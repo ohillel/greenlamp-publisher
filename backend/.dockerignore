@@ -1,0 +1,21 @@
+# Python runtime artifacts
+venv/
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local environment — credentials are set as Railway env vars, not baked in
+.env
+.env.*
+
+# Browser sessions — Railway container will log in fresh on first run
+scraper/sessions/
+
+# Debug screenshots — not needed in production
+scraper/debug_screenshots/
+
+# macOS
+.DS_Store

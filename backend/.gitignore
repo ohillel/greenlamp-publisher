@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env
+.DS_Store
+
+# Browser login sessions — regenerated automatically at runtime
+scraper/sessions/
+
+# Playwright debug screenshots — local dev only
+scraper/debug_screenshots/
