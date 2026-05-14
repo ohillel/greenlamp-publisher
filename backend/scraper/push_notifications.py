@@ -50,6 +50,7 @@ def send_push_to_roles(sb, roles: list[str], title: str, body: str) -> None:
 
     sb – Supabase client (service role, so RLS is bypassed)
     """
+    print(f"[push] send_push_to_roles: roles={roles!r} title={title!r} body={body!r}")
     try:
         # Get user_ids for the target roles
         profiles_res = (
@@ -59,7 +60,9 @@ def send_push_to_roles(sb, roles: list[str], title: str, body: str) -> None:
             .execute()
         )
         user_ids = [r["id"] for r in (profiles_res.data or [])]
+        print(f"[push] found {len(user_ids)} profile(s) for roles {roles!r}: {user_ids}")
         if not user_ids:
+            print(f"[push] no users found for roles {roles!r} — check profiles table role values")
             return
 
         # Get all push subscriptions for those users
@@ -70,6 +73,9 @@ def send_push_to_roles(sb, roles: list[str], title: str, body: str) -> None:
             .execute()
         )
         subscriptions = [r["subscription"] for r in (subs_res.data or [])]
+        print(f"[push] found {len(subscriptions)} subscription(s) for {len(user_ids)} user(s)")
+        if not subscriptions:
+            print(f"[push] no subscriptions saved — user(s) have not subscribed yet")
     except Exception as e:
         print(f"[push] error fetching subscriptions: {e}")
         return
@@ -77,6 +83,8 @@ def send_push_to_roles(sb, roles: list[str], title: str, body: str) -> None:
     for sub in subscriptions:
         try:
             send_push(sub, title, body)
+            endpoint = (sub.get("endpoint") or "")[:60]
+            print(f"[push] delivered OK → {endpoint}…")
         except WebPushException as e:
             # 410 Gone = subscription expired/revoked — log but don't crash
             print(f"[push] delivery failed ({e.response.status_code if e.response else '?'}): {e}")

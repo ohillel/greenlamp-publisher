@@ -12,11 +12,17 @@ const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const sendNotify = (event, clientName, magazine) => {
+  const payload = { event, client_name: clientName, magazine }
+  console.log(`[notify] calling /api/notify`, payload, '→', `${API_BASE}/api/notify`)
   fetch(`${API_BASE}/api/notify`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ event, client_name: clientName, magazine }),
-  }).catch(err => console.warn('[notify] failed:', err))
+    body:    JSON.stringify(payload),
+  })
+    .then(res => res.json().then(body => {
+      console.log(`[notify] response ${res.status}:`, body)
+    }))
+    .catch(err => console.warn('[notify] fetch failed:', err))
 }
 
 const PUBLISHERS = [
