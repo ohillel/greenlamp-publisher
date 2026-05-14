@@ -37,14 +37,8 @@ async function registerPush(userId) {
     const base64    = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/')
     const rawKey    = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
 
-    // If an existing subscription was created with a different key it will
-    // throw on subscribe() — unsubscribe first to get a clean state.
-    const existing = await registration.pushManager.getSubscription()
-    if (existing) {
-      await existing.unsubscribe()
-      console.log('[push] unsubscribed stale subscription')
-    }
-
+    // Reuse existing subscription if there is one — avoids creating a new
+    // endpoint on every login and accumulating stale rows in the DB.
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly:      true,
       applicationServerKey: rawKey,

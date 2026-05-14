@@ -116,13 +116,12 @@ async def push_subscribe(req: PushSubscribeRequest):
     """Save (or replace) a user's push subscription."""
     try:
         sb = _sb()
-        # Upsert on (user_id, endpoint) so multiple devices work
         endpoint = req.subscription.get("endpoint", "")
-        # Delete any existing row for this user+endpoint first, then insert
+        # Delete ALL existing rows for this user, then insert fresh.
+        # This clears stale subscriptions that accumulated from previous sessions.
         sb.from_("push_subscriptions") \
           .delete() \
           .eq("user_id", req.user_id) \
-          .eq("endpoint", endpoint) \
           .execute()
         sb.from_("push_subscriptions") \
           .insert({
