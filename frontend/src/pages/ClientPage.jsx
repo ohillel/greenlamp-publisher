@@ -377,10 +377,6 @@ export default function ClientPage() {
         .eq('id', id)
       if (error) throw error
 
-      await supabase
-        .from('notifications')
-        .insert({ article_id: id, user_role: 'or', is_read: false })
-
       setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'submitted' } : a))
       sendNotify('submitted', client?.name ?? '', magazine)
       setSuccessMsg(`"${magazine}" sent to Or for review.`)
