@@ -13,31 +13,50 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 async function registerPush(userId) {
   try {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
-
-    const registration = await navigator.serviceWorker.register('/sw.js')
-
-    const permission = await Notification.requestPermission()
-    if (permission !== 'granted') return
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      console.log('[push] not supported in this browser')
+      return
+    }
 
     const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY
-    if (!vapidKey) return
+    if (!vapidKey) {
+      console.warn('[push] VITE_VAPID_PUBLIC_KEY is not set — skipping subscription')
+      return
+    }
+
+    const permission = await Notification.requestPermission()
+    console.log('[push] notification permission:', permission)
+    if (permission !== 'granted') return
+
+    const registration = await navigator.serviceWorker.register('/sw.js')
+    await navigator.serviceWorker.ready
+    console.log('[push] service worker ready')
 
     // Convert base64url VAPID public key to Uint8Array
     const padding   = '='.repeat((4 - vapidKey.length % 4) % 4)
     const base64    = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/')
     const rawKey    = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
 
+    // If an existing subscription was created with a different key it will
+    // throw on subscribe() — unsubscribe first to get a clean state.
+    const existing = await registration.pushManager.getSubscription()
+    if (existing) {
+      await existing.unsubscribe()
+      console.log('[push] unsubscribed stale subscription')
+    }
+
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly:      true,
       applicationServerKey: rawKey,
     })
+    console.log('[push] subscribed, posting to server…')
 
-    await fetch(`${API_BASE}/api/push/subscribe`, {
+    const res = await fetch(`${API_BASE}/api/push/subscribe`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ user_id: userId, subscription: subscription.toJSON() }),
     })
+    console.log('[push] /api/push/subscribe response:', res.status)
   } catch (err) {
     console.warn('[push] registration failed:', err)
   }
