@@ -8,6 +8,16 @@ Called by the APScheduler job in main.py every 10 minutes.
 import os
 from supabase import create_client
 from . import check_presswhizz, check_linksme
+from .push_notifications import send_push_to_roles
+
+_PUSH_TITLES = {
+    "published":     "Greenlamp Publisher",
+    "not_published": "Greenlamp Publisher",
+}
+_PUSH_BODIES = {
+    "published":     "✅ Article published for {client} - {magazine}",
+    "not_published": "❌ Article rejected for {client} - {magazine}",
+}
 
 
 def _supabase_client():
@@ -101,11 +111,26 @@ def run_status_check(debug: bool = False) -> None:
         print("[checker] no status changes detected this run")
         return
 
+    # Build lookup: article_id → {client, magazine} for notification bodies
+    article_meta = {
+        a["id"]: {"client": a["client_name"], "magazine": a["magazine"]}
+        for a in pw_articles + lm_articles
+    }
+
     for article_id, new_status in all_results.items():
         try:
             sb.from_("articles").update({"status": new_status}).eq("id", article_id).execute()
             print(f"[checker] updated article ID={article_id} to status={new_status!r}")
         except Exception as e:
             print(f"[checker] ERROR updating article {article_id}: {e}")
+            continue
+
+        if new_status in _PUSH_BODIES:
+            meta = article_meta.get(article_id, {})
+            body = _PUSH_BODIES[new_status].format(
+                client=meta.get("client", ""),
+                magazine=meta.get("magazine", ""),
+            )
+            send_push_to_roles(sb, ["or", "denise"], _PUSH_TITLES[new_status], body)
 
     print(f"[checker] run complete — {len(all_results)} article(s) updated")

@@ -11,6 +11,14 @@ const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+const sendNotify = (event, clientName, magazine) => {
+  fetch(`${API_BASE}/api/notify`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ event, client_name: clientName, magazine }),
+  }).catch(err => console.warn('[notify] failed:', err))
+}
+
 const PUBLISHERS = [
   { value: 'presswhizz', label: 'PressWhizz' },
   { value: 'linksme',    label: 'Links.me'   },
@@ -374,6 +382,7 @@ export default function ClientPage() {
         .insert({ article_id: id, user_role: 'or', is_read: false })
 
       setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'submitted' } : a))
+      sendNotify('submitted', client?.name ?? '', magazine)
       setSuccessMsg(`"${magazine}" sent to Or for review.`)
       setTimeout(() => setSuccessMsg(''), 6000)
     } catch (err) {
@@ -430,8 +439,11 @@ export default function ClientPage() {
   const approve = async id => {
     setApproving(id)
     const { error } = await supabase.from('articles').update({ status: 'approved' }).eq('id', id)
-    // Article stays in the list — update status in place
-    if (!error) setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'approved' } : a))
+    if (!error) {
+      const article = articles.find(a => a.id === id)
+      setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'approved' } : a))
+      sendNotify('approved', client?.name ?? '', article?.magazine ?? '')
+    }
     setApproving(null)
   }
 
@@ -440,7 +452,11 @@ export default function ClientPage() {
   const markSent = async id => {
     setMarkingId(id)
     const { error } = await supabase.from('articles').update({ status: 'sent_to_publisher' }).eq('id', id)
-    if (!error) setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'sent_to_publisher' } : a))
+    if (!error) {
+      const article = articles.find(a => a.id === id)
+      setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'sent_to_publisher' } : a))
+      sendNotify('sent', client?.name ?? '', article?.magazine ?? '')
+    }
     setMarkingId(null)
   }
 

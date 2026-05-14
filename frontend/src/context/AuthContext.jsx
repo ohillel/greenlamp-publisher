@@ -9,6 +9,40 @@ import {
 } from 'react'
 import { supabase } from '../lib/supabase'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+async function registerPush(userId) {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+
+    const registration = await navigator.serviceWorker.register('/sw.js')
+
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') return
+
+    const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY
+    if (!vapidKey) return
+
+    // Convert base64url VAPID public key to Uint8Array
+    const padding   = '='.repeat((4 - vapidKey.length % 4) % 4)
+    const base64    = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/')
+    const rawKey    = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly:      true,
+      applicationServerKey: rawKey,
+    })
+
+    await fetch(`${API_BASE}/api/push/subscribe`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ user_id: userId, subscription: subscription.toJSON() }),
+    })
+  } catch (err) {
+    console.warn('[push] registration failed:', err)
+  }
+}
+
 // ─── Contexts ───────────────────────────────────────────────────────────────
 // Split into two so the topbar (email / sign-out) can subscribe without
 // re-rendering the entire page when auth-profile data changes.
@@ -61,6 +95,9 @@ export function AuthProvider({ children }) {
             const r = await fetchRole(userId)
             if (!mounted) return   // stale mount (StrictMode) — the live mount handles it
             setRole(r)
+
+            // Register push subscription in the background — non-blocking
+            registerPush(userId)
           }
           // If same user (TOKEN_REFRESHED, etc.) skip all state updates.
           // user/role are already correct; no re-render needed.

@@ -7,11 +7,18 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from apscheduler.schedulers.background import BackgroundScheduler
+from supabase import create_client
 
 load_dotenv()
 
-from scraper.prices import fetch_prices              # noqa: E402
-from scraper.status_checker import run_status_check  # noqa: E402
+from scraper.prices import fetch_prices                      # noqa: E402
+from scraper.status_checker import run_status_check          # noqa: E402
+from scraper.push_notifications import send_push_to_roles    # noqa: E402
+
+
+def _sb():
+    """Return a Supabase service-role client (bypasses RLS)."""
+    return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
 
 CHECK_INTERVAL_MINUTES = 10
 
@@ -93,5 +100,77 @@ async def get_prices(req: PricesRequest):
         )
         print(f"[api/prices] result={result!r}")
         return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Push notification endpoints ───────────────────────────────────────────────
+
+class PushSubscribeRequest(BaseModel):
+    user_id:      str
+    subscription: dict   # {endpoint, keys: {p256dh, auth}}
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(req: PushSubscribeRequest):
+    """Save (or replace) a user's push subscription."""
+    try:
+        sb = _sb()
+        # Upsert on (user_id, endpoint) so multiple devices work
+        endpoint = req.subscription.get("endpoint", "")
+        # Delete any existing row for this user+endpoint first, then insert
+        sb.from_("push_subscriptions") \
+          .delete() \
+          .eq("user_id", req.user_id) \
+          .eq("endpoint", endpoint) \
+          .execute()
+        sb.from_("push_subscriptions") \
+          .insert({
+              "user_id":      req.user_id,
+              "endpoint":     endpoint,
+              "subscription": req.subscription,
+          }) \
+          .execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class NotifyRequest(BaseModel):
+    event:       str   # 'submitted' | 'approved' | 'sent'
+    client_name: str
+    magazine:    str
+
+
+_NOTIFY_MAP: dict[str, tuple[list[str], str]] = {
+    # event → (recipient_roles, body_template)
+    "submitted": (
+        ["or"],
+        "New article pending approval for client {client} - {magazine}",
+    ),
+    "approved": (
+        ["publisher"],
+        "Article approved for {client} - please send to {magazine}",
+    ),
+    "sent": (
+        ["or", "denise"],
+        "Article sent to publisher for {client} - {magazine}",
+    ),
+}
+
+
+@app.post("/api/notify")
+async def notify(req: NotifyRequest):
+    """Send a push notification to the appropriate roles for a status-change event."""
+    entry = _NOTIFY_MAP.get(req.event)
+    if not entry:
+        raise HTTPException(status_code=422, detail=f"Unknown event: {req.event!r}")
+    roles, body_template = entry
+    body  = body_template.format(client=req.client_name, magazine=req.magazine)
+    title = "Greenlamp Publisher"
+    try:
+        sb = _sb()
+        await run_in_threadpool(send_push_to_roles, sb, roles, title, body)
+        return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
