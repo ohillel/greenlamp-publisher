@@ -1,18 +1,31 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
+
+// Which article status triggers the red indicator per role (null = no indicator)
+const PENDING_STATUS = {
+  or:        'submitted',
+  publisher: 'approved',
+}
 
 export default function ClientsPage() {
-  const [clients,    setClients]    = useState([])
-  const [loading,    setLoading]    = useState(true)
-  const [search,     setSearch]     = useState('')
-  const [adding,     setAdding]     = useState(false)
-  const [newName,    setNewName]    = useState('')
-  const [saving,     setSaving]     = useState(false)
-  const [deletingId, setDeletingId] = useState(null)
+  const [clients,          setClients]          = useState([])
+  const [loading,          setLoading]          = useState(true)
+  const [search,           setSearch]           = useState('')
+  const [adding,           setAdding]           = useState(false)
+  const [newName,          setNewName]          = useState('')
+  const [saving,           setSaving]           = useState(false)
+  const [deletingId,       setDeletingId]       = useState(null)
+  const [pendingClientIds, setPendingClientIds] = useState(new Set())
   const inputRef = useRef(null)
   const navigate = useNavigate()
+  const { role } = useAuth()
+
+  const pendingStatus = PENDING_STATUS[role] ?? null
+
+  // ── Fetch clients ────────────────────────────────────────────────────────────
 
   useEffect(() => {
     supabase.from('clients').select('id, name').order('name')
@@ -22,6 +35,32 @@ export default function ClientsPage() {
   useEffect(() => {
     if (adding) inputRef.current?.focus()
   }, [adding])
+
+  // ── Pending indicators ───────────────────────────────────────────────────────
+
+  const refreshPending = useCallback(async () => {
+    if (!pendingStatus) return
+    const { data } = await supabase
+      .from('articles')
+      .select('client_id')
+      .eq('status', pendingStatus)
+    if (data) setPendingClientIds(new Set(data.map(r => r.client_id)))
+  }, [pendingStatus])
+
+  // Initial load
+  useEffect(() => { refreshPending() }, [refreshPending])
+
+  // Realtime: re-query on any article change so the indicators stay accurate
+  useEffect(() => {
+    if (!pendingStatus) return
+    const channel = supabase
+      .channel('articles-pending-indicators')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'articles' }, refreshPending)
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [pendingStatus, refreshPending])
+
+  // ── Mutations ────────────────────────────────────────────────────────────────
 
   const addClient = async () => {
     const name = newName.trim()
@@ -47,6 +86,8 @@ export default function ClientsPage() {
     if (!error) setClients(prev => prev.filter(c => c.id !== id))
     setDeletingId(null)
   }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   const q = search.trim().toLowerCase()
   const visibleClients = q
@@ -103,31 +144,34 @@ export default function ClientsPage() {
         </div>
       ) : (
         <div className="clients-grid">
-          {visibleClients.map(client => (
-            <div
-              key={client.id}
-              className={`client-card ${deletingId === client.id ? 'deleting' : ''}`}
-              onClick={() => navigate(`/clients/${client.id}`)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={e => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
-            >
-              <div className="folder-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
-                </svg>
-              </div>
-              <span className="client-name">{client.name}</span>
-              <button
-                className="client-delete-btn"
-                onClick={e => deleteClient(e, client.id, client.name)}
-                disabled={deletingId === client.id}
-                title="Delete client"
+          {visibleClients.map(client => {
+            const isPending = pendingClientIds.has(client.id)
+            return (
+              <div
+                key={client.id}
+                className={`client-card${isPending ? ' client-card--pending' : ''}${deletingId === client.id ? ' deleting' : ''}`}
+                onClick={() => navigate(`/clients/${client.id}`)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={e => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
               >
-                ×
-              </button>
-            </div>
-          ))}
+                <div className="folder-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+                  </svg>
+                </div>
+                <span className="client-name">{client.name}</span>
+                <button
+                  className="client-delete-btn"
+                  onClick={e => deleteClient(e, client.id, client.name)}
+                  disabled={deletingId === client.id}
+                  title="Delete client"
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
     </Layout>

@@ -495,6 +495,16 @@ body {
   transform: translateY(-1px);
 }
 .client-card.deleting { opacity: .5; pointer-events: none; }
+.client-card--pending {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+}
+.client-card--pending:hover {
+  border-color: #dc2626;
+  box-shadow: 0 4px 16px rgba(0,0,0,.08), 0 0 0 3px rgba(239, 68, 68, 0.22);
+  transform: translateY(-1px);
+}
+.client-card--pending .folder-icon { color: #ef4444; }
 
 .folder-icon {
   width: 48px;
