@@ -208,6 +208,58 @@ async def push_test():
     return report
 
 
+@app.post("/api/email/test")
+async def email_test():
+    """
+    Diagnostic endpoint — attempts a real Gmail SMTP send and returns
+    a full report: env var status, SMTP connection result, any error detail.
+    """
+    import smtplib
+    import ssl
+
+    gmail_user     = os.environ.get("GMAIL_USER", "")
+    gmail_password = os.environ.get("GMAIL_APP_PASSWORD", "")
+
+    report: dict = {
+        "gmail_user_set":     bool(gmail_user),
+        "gmail_password_set": bool(gmail_password),
+        "gmail_user":         gmail_user or "(not set)",
+    }
+
+    if not gmail_user or not gmail_password:
+        report["result"] = "skipped — credentials not set"
+        return report
+
+    # Try connecting and authenticating first
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
+            smtp.login(gmail_user, gmail_password)
+            report["smtp_login"] = "ok"
+
+            # Send a real test email to the sender themselves
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = "Greenlamp email test"
+            msg["From"]    = gmail_user
+            msg["To"]      = gmail_user
+            msg.attach(MIMEText("<p>Email notifications are working.</p>", "html"))
+            smtp.sendmail(gmail_user, [gmail_user], msg.as_string())
+            report["result"] = f"ok — test email sent to {gmail_user}"
+    except smtplib.SMTPAuthenticationError as e:
+        report["result"] = "auth_error"
+        report["detail"] = str(e)
+    except smtplib.SMTPException as e:
+        report["result"] = "smtp_error"
+        report["detail"] = str(e)
+    except Exception as e:
+        report["result"] = "error"
+        report["detail"] = str(e)
+
+    return report
+
+
 @app.post("/api/notify")
 async def notify(req: NotifyRequest):
     """Send a push notification to the appropriate roles for a status-change event."""
