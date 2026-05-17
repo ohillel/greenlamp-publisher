@@ -231,17 +231,17 @@ async def email_test():
         return report
 
     def _do_smtp_test():
-        context = ssl.create_default_context()
-        # timeout=10 so a blocked port fails fast instead of hanging forever
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as smtp:
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "Greenlamp email test"
+        msg["From"]    = gmail_user
+        msg["To"]      = gmail_user
+        msg.attach(MIMEText("<p>Email notifications are working.</p>", "html"))
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
             smtp.login(gmail_user, gmail_password)
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = "Greenlamp email test"
-            msg["From"]    = gmail_user
-            msg["To"]      = gmail_user
-            msg.attach(MIMEText("<p>Email notifications are working.</p>", "html"))
             smtp.sendmail(gmail_user, [gmail_user], msg.as_string())
 
     # Run in a thread — smtplib is blocking and must not run on the event loop
