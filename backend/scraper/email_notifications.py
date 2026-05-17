@@ -1,14 +1,16 @@
 """
-Email notifications via Resend (https://resend.com).
+Email notifications via Gmail API (OAuth2).
 
-Environment variables required:
-  RESEND_API_KEY    – API key from resend.com dashboard
-  RESEND_FROM_EMAIL – verified sender address (e.g. "Greenlamp Publisher <notifications@greenlamp.co>")
-                      Until greenlamp.co is verified in Resend, use "onboarding@resend.dev"
-                      but note that address can only deliver to the Resend account owner's email.
+Environment variable required:
+  GOOGLE_TOKEN_JSON – contents of the OAuth2 token.json file for seojobisrael@gmail.com
+
+Sender: seojobisrael@gmail.com
 """
 import os
-import resend
+import base64
+import sys
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 APP_URL = "https://greenlamp-publisher.vercel.app"
 
@@ -18,28 +20,31 @@ _ROLE_EMAILS: dict[str, str] = {
     "denise":    "denise@greenlamp.co",
 }
 
+SENDER = "seojobisrael@gmail.com"
+
+
+def _gmail_service():
+    # Import here so the module loads even if google libs aren't installed yet
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    from google_client import get_credentials
+    from googleapiclient.discovery import build
+    creds = get_credentials()
+    return build("gmail", "v1", credentials=creds)
+
 
 def send_email_to_roles(roles: list[str], subject: str, body_text: str) -> None:
     """
-    Send an email to every address mapped from `roles`.
-    Silently skips if RESEND_API_KEY is not configured.
+    Send an email to every address mapped from `roles` using the Gmail API.
+    Silently skips if GOOGLE_TOKEN_JSON is not configured.
     """
-    api_key = os.environ.get("RESEND_API_KEY", "")
-    if not api_key:
-        print("[email] RESEND_API_KEY not set — skipping")
+    if not os.environ.get("GOOGLE_TOKEN_JSON"):
+        print("[email] GOOGLE_TOKEN_JSON not set — skipping")
         return
-
-    resend.api_key = api_key
 
     to_emails = [_ROLE_EMAILS[r] for r in roles if r in _ROLE_EMAILS]
     if not to_emails:
         print(f"[email] no addresses mapped for roles {roles!r} — skipping")
         return
-
-    from_addr = os.environ.get(
-        "RESEND_FROM_EMAIL",
-        "onboarding@resend.dev",
-    )
 
     html = f"""\
 <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a1a1a">
@@ -53,12 +58,20 @@ def send_email_to_roles(roles: list[str], subject: str, body_text: str) -> None:
 """
 
     try:
-        resend.Emails.send({
-            "from":    from_addr,
-            "to":      to_emails,
-            "subject": subject,
-            "html":    html,
-        })
-        print(f"[email] sent to {to_emails!r}: {subject!r}")
+        service = _gmail_service()
+        for to_addr in to_emails:
+            msg = MIMEMultipart("alternative")
+            msg["From"]    = SENDER
+            msg["To"]      = to_addr
+            msg["Subject"] = subject
+            msg.attach(MIMEText(body_text, "plain", "utf-8"))
+            msg.attach(MIMEText(html,      "html",  "utf-8"))
+
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            service.users().messages().send(
+                userId="me",
+                body={"raw": raw},
+            ).execute()
+            print(f"[email] sent to {to_addr!r}: {subject!r}")
     except Exception as e:
         print(f"[email] error sending to {to_emails!r}: {e}")

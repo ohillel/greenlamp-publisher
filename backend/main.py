@@ -211,35 +211,26 @@ async def push_test():
 @app.post("/api/email/test")
 async def email_test():
     """
-    Diagnostic endpoint — sends a test email via Resend and returns the result.
+    Diagnostic endpoint — sends a test email via Gmail API and returns the result.
     """
-    import resend as _resend
+    from scraper.email_notifications import send_email_to_roles
 
-    api_key   = os.environ.get("RESEND_API_KEY", "")
-    from_addr = os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev")
-
+    token_set = bool(os.environ.get("GOOGLE_TOKEN_JSON"))
     report: dict = {
-        "api_key_set": bool(api_key),
-        "from":        from_addr,
+        "google_token_set": token_set,
+        "sender": "seojobisrael@gmail.com",
     }
 
-    if not api_key:
-        report["result"] = "skipped — RESEND_API_KEY not set"
+    if not token_set:
+        report["result"] = "skipped — GOOGLE_TOKEN_JSON not set"
         return report
 
     def _do_send():
-        _resend.api_key = api_key
-        return _resend.Emails.send({
-            "from":    from_addr,
-            "to":      [from_addr] if "@resend.dev" in from_addr else [from_addr],
-            "subject": "Greenlamp email test",
-            "html":    "<p>Email notifications are working.</p>",
-        })
+        send_email_to_roles(["or"], "Greenlamp email test", "Email notifications are working.")
 
     try:
-        result = await run_in_threadpool(_do_send)
+        await run_in_threadpool(_do_send)
         report["result"] = "ok"
-        report["resend_id"] = getattr(result, "id", str(result))
     except Exception as e:
         report["result"] = "error"
         report["detail"] = str(e)
