@@ -9,6 +9,7 @@ import os
 from supabase import create_client
 from . import check_presswhizz, check_linksme
 from .push_notifications import send_push_to_roles
+from .email_notifications import send_email_to_roles
 
 _PUSH_BODIES = {
     "published":     "✅ Published for {client} → {magazine}",
@@ -137,5 +138,6 @@ def run_status_check(debug: bool = False) -> None:
                 magazine=_domain(meta.get("magazine", "")),
             )
             send_push_to_roles(sb, ["or", "denise"], "Greenlamp Publisher", body)
+            send_email_to_roles(["or", "denise"], body, body)
 
     print(f"[checker] run complete — {len(all_results)} article(s) updated")

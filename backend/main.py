@@ -14,6 +14,7 @@ load_dotenv()
 from scraper.prices import fetch_prices                      # noqa: E402
 from scraper.status_checker import run_status_check          # noqa: E402
 from scraper.push_notifications import send_push_to_roles    # noqa: E402
+from scraper.email_notifications import send_email_to_roles  # noqa: E402
 
 
 def _sb():
@@ -222,6 +223,7 @@ async def notify(req: NotifyRequest):
     try:
         sb = _sb()
         await run_in_threadpool(send_push_to_roles, sb, roles, title, body)
+        await run_in_threadpool(send_email_to_roles, roles, body, body)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
