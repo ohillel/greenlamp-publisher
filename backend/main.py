@@ -143,18 +143,9 @@ class NotifyRequest(BaseModel):
 
 _NOTIFY_MAP: dict[str, tuple[list[str], str]] = {
     # event → (recipient_roles, body_template)
-    "submitted": (
-        ["or"],
-        "New article pending approval for client {client} - {magazine}",
-    ),
-    "approved": (
-        ["publisher"],
-        "Article approved for {client} - please send to {magazine}",
-    ),
-    "sent": (
-        ["or", "denise"],
-        "Article sent to publisher for {client} - {magazine}",
-    ),
+    "submitted": (["or"],           "New article for {client} → {magazine}"),
+    "approved":  (["publisher"],    "Ready to send for {client} → {magazine}"),
+    "sent":      (["or", "denise"], "Article sent for {client} → {magazine}"),
 }
 
 
@@ -223,7 +214,10 @@ async def notify(req: NotifyRequest):
     if not entry:
         raise HTTPException(status_code=422, detail=f"Unknown event: {req.event!r}")
     roles, body_template = entry
-    body  = body_template.format(client=req.client_name, magazine=req.magazine)
+    body  = body_template.format(
+        client=req.client_name,
+        magazine=extract_domain(req.magazine),
+    )
     title = "Greenlamp Publisher"
     try:
         sb = _sb()

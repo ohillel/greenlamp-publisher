@@ -10,14 +10,19 @@ from supabase import create_client
 from . import check_presswhizz, check_linksme
 from .push_notifications import send_push_to_roles
 
-_PUSH_TITLES = {
-    "published":     "Greenlamp Publisher",
-    "not_published": "Greenlamp Publisher",
-}
 _PUSH_BODIES = {
-    "published":     "✅ Article published for {client} - {magazine}",
-    "not_published": "❌ Article rejected for {client} - {magazine}",
+    "published":     "✅ Published for {client} → {magazine}",
+    "not_published": "❌ Rejected for {client} → {magazine}",
 }
+
+
+def _domain(url: str) -> str:
+    """Strip protocol, www., and trailing path — return bare domain."""
+    url = url.strip()
+    if url.startswith("http"):
+        from urllib.parse import urlparse
+        url = urlparse(url).netloc
+    return url.replace("www.", "").split("/")[0].strip()
 
 
 def _supabase_client():
@@ -129,8 +134,8 @@ def run_status_check(debug: bool = False) -> None:
             meta = article_meta.get(article_id, {})
             body = _PUSH_BODIES[new_status].format(
                 client=meta.get("client", ""),
-                magazine=meta.get("magazine", ""),
+                magazine=_domain(meta.get("magazine", "")),
             )
-            send_push_to_roles(sb, ["or", "denise"], _PUSH_TITLES[new_status], body)
+            send_push_to_roles(sb, ["or", "denise"], "Greenlamp Publisher", body)
 
     print(f"[checker] run complete — {len(all_results)} article(s) updated")
