@@ -158,6 +158,64 @@ _NOTIFY_MAP: dict[str, tuple[list[str], str]] = {
 }
 
 
+@app.post("/api/push/test")
+async def push_test():
+    """
+    Diagnostic endpoint — sends a test push to every subscribed user and
+    returns a full report: VAPID config, profiles, subscriptions, delivery results.
+    """
+    from scraper.push_notifications import send_push, _vapid_claims
+    from pywebpush import WebPushException
+
+    report: dict = {}
+
+    # 1. VAPID env vars
+    private_key = os.environ.get("VAPID_PRIVATE_KEY", "")
+    public_key  = os.environ.get("VAPID_PUBLIC_KEY",  "")
+    email       = os.environ.get("VAPID_EMAIL",       "")
+    report["vapid"] = {
+        "private_key_set": bool(private_key),
+        "public_key_set":  bool(public_key),
+        "email":           email or "(not set)",
+        "claims":          _vapid_claims(),
+    }
+
+    try:
+        sb = _sb()
+
+        # 2. All profiles + roles
+        profiles_res = sb.from_("profiles").select("id, role").execute()
+        profiles     = profiles_res.data or []
+        report["profiles"] = [{"user_id": p["id"], "role": p.get("role")} for p in profiles]
+
+        # 3. All subscriptions
+        subs_res = sb.from_("push_subscriptions").select("user_id, endpoint, subscription").execute()
+        subs     = subs_res.data or []
+        report["subscriptions_count"] = len(subs)
+
+        # 4. Attempt delivery to every subscription
+        results = []
+        for row in subs:
+            endpoint = (row.get("endpoint") or "")[:80]
+            sub      = row.get("subscription") or {}
+            try:
+                send_push(sub, "Greenlamp Test", "Push notifications are working!")
+                results.append({"endpoint": endpoint, "status": "ok"})
+            except WebPushException as e:
+                status_code = e.response.status_code if e.response else None
+                results.append({"endpoint": endpoint, "status": "webpush_error",
+                                 "http_status": status_code, "detail": str(e)})
+            except Exception as e:
+                results.append({"endpoint": endpoint, "status": "error", "detail": str(e)})
+
+        report["delivery"] = results
+
+    except Exception as e:
+        report["error"] = str(e)
+
+    return report
+
+
 @app.post("/api/notify")
 async def notify(req: NotifyRequest):
     """Send a push notification to the appropriate roles for a status-change event."""
