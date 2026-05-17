@@ -211,49 +211,35 @@ async def push_test():
 @app.post("/api/email/test")
 async def email_test():
     """
-    Diagnostic endpoint — attempts a real Gmail SMTP send and returns
-    a full report: env var status, SMTP connection result, any error detail.
+    Diagnostic endpoint — sends a test email via Resend and returns the result.
     """
-    import smtplib
-    import ssl
+    import resend as _resend
 
-    gmail_user     = os.environ.get("GMAIL_USER", "")
-    gmail_password = os.environ.get("GMAIL_APP_PASSWORD", "")
+    api_key   = os.environ.get("RESEND_API_KEY", "")
+    from_addr = os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 
     report: dict = {
-        "gmail_user_set":     bool(gmail_user),
-        "gmail_password_set": bool(gmail_password),
-        "gmail_user":         gmail_user or "(not set)",
+        "api_key_set": bool(api_key),
+        "from":        from_addr,
     }
 
-    if not gmail_user or not gmail_password:
-        report["result"] = "skipped — credentials not set"
+    if not api_key:
+        report["result"] = "skipped — RESEND_API_KEY not set"
         return report
 
-    def _do_smtp_test():
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = "Greenlamp email test"
-        msg["From"]    = gmail_user
-        msg["To"]      = gmail_user
-        msg.attach(MIMEText("<p>Email notifications are working.</p>", "html"))
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.login(gmail_user, gmail_password)
-            smtp.sendmail(gmail_user, [gmail_user], msg.as_string())
+    def _do_send():
+        _resend.api_key = api_key
+        return _resend.Emails.send({
+            "from":    from_addr,
+            "to":      [from_addr] if "@resend.dev" in from_addr else [from_addr],
+            "subject": "Greenlamp email test",
+            "html":    "<p>Email notifications are working.</p>",
+        })
 
-    # Run in a thread — smtplib is blocking and must not run on the event loop
     try:
-        await run_in_threadpool(_do_smtp_test)
-        report["result"] = f"ok — test email sent to {gmail_user}"
-    except smtplib.SMTPAuthenticationError as e:
-        report["result"] = "auth_error"
-        report["detail"] = str(e)
-    except smtplib.SMTPException as e:
-        report["result"] = "smtp_error"
-        report["detail"] = str(e)
+        result = await run_in_threadpool(_do_send)
+        report["result"] = "ok"
+        report["resend_id"] = getattr(result, "id", str(result))
     except Exception as e:
         report["result"] = "error"
         report["detail"] = str(e)

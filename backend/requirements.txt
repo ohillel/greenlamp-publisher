@@ -43,6 +43,7 @@ python-dotenv==1.2.2
 PyYAML==6.0.3
 realtime==2.30.0
 requests==2.34.0
+resend==2.4.0
 rich==14.3.4
 six==1.17.0
 starlette==1.0.0

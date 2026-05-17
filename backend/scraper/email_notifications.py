@@ -1,14 +1,14 @@
 """
-Email notifications via Gmail SMTP.
+Email notifications via Resend (https://resend.com).
 
 Environment variables required:
-  GMAIL_USER         – Gmail address used to send (e.g. or@greenlamp.co)
-  GMAIL_APP_PASSWORD – 16-character Gmail App Password (not the account password)
+  RESEND_API_KEY    – API key from resend.com dashboard
+  RESEND_FROM_EMAIL – verified sender address (e.g. "Greenlamp Publisher <notifications@greenlamp.co>")
+                      Until greenlamp.co is verified in Resend, use "onboarding@resend.dev"
+                      but note that address can only deliver to the Resend account owner's email.
 """
 import os
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+import resend
 
 APP_URL = "https://greenlamp-publisher.vercel.app"
 
@@ -22,18 +22,24 @@ _ROLE_EMAILS: dict[str, str] = {
 def send_email_to_roles(roles: list[str], subject: str, body_text: str) -> None:
     """
     Send an email to every address mapped from `roles`.
-    Silently skips if Gmail credentials are not configured.
+    Silently skips if RESEND_API_KEY is not configured.
     """
-    gmail_user     = os.environ.get("GMAIL_USER", "")
-    gmail_password = os.environ.get("GMAIL_APP_PASSWORD", "")
-    if not gmail_user or not gmail_password:
-        print("[email] GMAIL_USER or GMAIL_APP_PASSWORD not set — skipping")
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        print("[email] RESEND_API_KEY not set — skipping")
         return
+
+    resend.api_key = api_key
 
     to_emails = [_ROLE_EMAILS[r] for r in roles if r in _ROLE_EMAILS]
     if not to_emails:
         print(f"[email] no addresses mapped for roles {roles!r} — skipping")
         return
+
+    from_addr = os.environ.get(
+        "RESEND_FROM_EMAIL",
+        "onboarding@resend.dev",
+    )
 
     html = f"""\
 <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a1a1a">
@@ -46,18 +52,13 @@ def send_email_to_roles(roles: list[str], subject: str, body_text: str) -> None:
 </div>
 """
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = gmail_user
-    msg["To"]      = ", ".join(to_emails)
-    msg.attach(MIMEText(html, "html"))
-
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            smtp.login(gmail_user, gmail_password)
-            smtp.sendmail(gmail_user, to_emails, msg.as_string())
+        resend.Emails.send({
+            "from":    from_addr,
+            "to":      to_emails,
+            "subject": subject,
+            "html":    html,
+        })
         print(f"[email] sent to {to_emails!r}: {subject!r}")
     except Exception as e:
         print(f"[email] error sending to {to_emails!r}: {e}")
