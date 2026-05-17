@@ -53,7 +53,9 @@ def send_email_to_roles(roles: list[str], subject: str, body_text: str) -> None:
     msg.attach(MIMEText(html, "html"))
 
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        import ssl
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as smtp:
             smtp.login(gmail_user, gmail_password)
             smtp.sendmail(gmail_user, to_emails, msg.as_string())
         print(f"[email] sent to {to_emails!r}: {subject!r}")

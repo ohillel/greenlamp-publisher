@@ -230,14 +230,11 @@ async def email_test():
         report["result"] = "skipped — credentials not set"
         return report
 
-    # Try connecting and authenticating first
-    try:
+    def _do_smtp_test():
         context = ssl.create_default_context()
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
+        # timeout=10 so a blocked port fails fast instead of hanging forever
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as smtp:
             smtp.login(gmail_user, gmail_password)
-            report["smtp_login"] = "ok"
-
-            # Send a real test email to the sender themselves
             from email.mime.multipart import MIMEMultipart
             from email.mime.text import MIMEText
             msg = MIMEMultipart("alternative")
@@ -246,7 +243,11 @@ async def email_test():
             msg["To"]      = gmail_user
             msg.attach(MIMEText("<p>Email notifications are working.</p>", "html"))
             smtp.sendmail(gmail_user, [gmail_user], msg.as_string())
-            report["result"] = f"ok — test email sent to {gmail_user}"
+
+    # Run in a thread — smtplib is blocking and must not run on the event loop
+    try:
+        await run_in_threadpool(_do_smtp_test)
+        report["result"] = f"ok — test email sent to {gmail_user}"
     except smtplib.SMTPAuthenticationError as e:
         report["result"] = "auth_error"
         report["detail"] = str(e)
