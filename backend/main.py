@@ -257,3 +257,56 @@ async def notify(req: NotifyRequest):
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── User management ───────────────────────────────────────────────────────────
+
+class ChangePasswordRequest(BaseModel):
+    user_id:      str
+    new_password: str
+
+
+@app.post("/api/admin/change-password")
+async def change_password(req: ChangePasswordRequest):
+    """
+    Change any user's password via the Supabase Auth admin API.
+    Only callable by Or (role enforcement is on the frontend via route guard;
+    the service-role key used here must never be exposed to non-Or users).
+    """
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=422, detail="Password must be at least 6 characters.")
+    try:
+        sb = _sb()
+        result = sb.auth.admin.update_user_by_id(
+            req.user_id,
+            {"password": req.new_password},
+        )
+        if result.user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/users")
+async def list_users():
+    """Return id + email + role for all users (used by the admin page)."""
+    try:
+        sb = _sb()
+        auth_resp   = sb.auth.admin.list_users()
+        profile_resp = sb.from_("profiles").select("id, role").execute()
+        role_map = {p["id"]: p.get("role") for p in (profile_resp.data or [])}
+
+        users = [
+            {
+                "id":    u.id,
+                "email": u.email,
+                "role":  role_map.get(u.id),
+            }
+            for u in auth_resp
+        ]
+        return {"users": users}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

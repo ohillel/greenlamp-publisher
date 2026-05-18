@@ -132,6 +132,17 @@ body {
 }
 .btn-signout:hover { border-color: var(--text-muted); color: var(--text); }
 
+.topbar-nav-link {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: border-color .15s, color .15s;
+}
+.topbar-nav-link:hover { border-color: var(--text-muted); color: var(--text); }
+
 /* ── App shell (authenticated views) ── */
 .app-shell {
   min-height: 100vh;
@@ -849,4 +860,114 @@ body {
   padding: 2px 6px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+/* ── User management page ── */
+.users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 560px;
+}
+
+.user-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.user-email {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.btn-change-pw {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color .15s, background .15s;
+}
+.btn-change-pw:hover { border-color: var(--green); color: var(--green); }
+
+.pw-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  max-width: 280px;
+}
+
+.pw-input {
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  outline: none;
+  transition: border-color .15s;
+  width: 100%;
+}
+.pw-input:focus { border-color: var(--green); }
+
+.pw-error {
+  font-size: 12px;
+  color: var(--error);
+}
+
+.pw-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-primary.pw-save {
+  width: auto;
+  padding: 7px 16px;
+  font-size: 13px;
+}
+
+.btn-cancel {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color .15s;
+}
+.btn-cancel:hover { color: var(--text); }
+
+.users-success {
+  font-size: 13px;
+  color: #1E8449;
+  background: #EAFAF1;
+  border: 1px solid #a9dfbf;
+  border-radius: 7px;
+  padding: 10px 14px;
+  margin-bottom: 20px;
+  max-width: 560px;
 }

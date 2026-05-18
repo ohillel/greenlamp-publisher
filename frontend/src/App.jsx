@@ -4,6 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import ClientsPage from './pages/ClientsPage'
 import ClientPage from './pages/ClientPage'
+import UsersPage from './pages/UsersPage'
 
 function RootRedirect() {
   const { role, loading } = useAuth()
@@ -21,6 +22,7 @@ export default function App() {
           <Route path="/login"               element={<Login />} />
           <Route path="/clients"             element={<ProtectedRoute><ClientsPage /></ProtectedRoute>} />
           <Route path="/clients/:clientId"   element={<ProtectedRoute><ClientPage /></ProtectedRoute>} />
+          <Route path="/users"               element={<ProtectedRoute><UsersPage /></ProtectedRoute>} />
           <Route path="*"                    element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
