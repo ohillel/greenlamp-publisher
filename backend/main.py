@@ -72,7 +72,7 @@ def extract_domain(url: str) -> str:
 
 @app.get("/")
 def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "email_backend": "gmail_api_v1"}
 
 
 class PricesRequest(BaseModel):
