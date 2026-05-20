@@ -175,12 +175,15 @@ def _find_report_url(page, client_name: str, debug: bool) -> str | None:
 
 def _map_publication_status(text: str) -> str | None:
     """
-    'Published 14.05.2026' → 'published'
-    'Rejected 14.05.2026'  → 'not_published'
-    anything else          → None
+    'Published 14.05.2026'              → 'published'
+    'Confirmation request 14.05.2026'   → 'published'
+    'Rejected 14.05.2026'               → 'not_published'
+    anything else                       → None
     """
     lower = text.strip().lower()
     if lower.startswith('published'):
+        return 'published'
+    if lower.startswith('confirmation request'):
         return 'published'
     if lower.startswith('rejected'):
         return 'not_published'
