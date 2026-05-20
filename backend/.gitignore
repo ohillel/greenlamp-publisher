@@ -10,3 +10,7 @@ scraper/sessions/
 
 # Playwright debug screenshots — local dev only
 scraper/debug_screenshots/
+
+# Google OAuth credentials — never commit
+credentials.json
+token.json

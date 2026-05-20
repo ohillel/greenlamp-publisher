@@ -28,6 +28,25 @@ _PRICE_RE = re.compile(
     re.IGNORECASE,
 )
 
+
+def _normalize_domain(raw: str) -> str:
+    """
+    Reduce any URL or domain string to a bare lowercase domain.
+    Handles full URLs (https://www.blackdown.org/), www-prefixed domains,
+    and domains with trailing slashes or paths.
+    Examples:
+      "https://www.blackdown.org/" → "blackdown.org"
+      "www.blackdown.org"          → "blackdown.org"
+      "blackdown.org"              → "blackdown.org"
+    """
+    s = raw.strip().lower()
+    for scheme in ("https://", "http://"):
+        if s.startswith(scheme):
+            s = s[len(scheme):]
+    if s.startswith("www."):
+        s = s[4:]
+    return s.split("/")[0].strip()
+
 _NAV_LABELS = {
     'Budget', 'Report', 'Guest Posting Sites List', 'Link Insertion Sites List',
     'Articles and links', 'Favorites', 'Stop List', 'Forum links',
@@ -273,16 +292,19 @@ def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
             print("  [linksme] no records — domain not in catalog")
         return prices
 
-    domain_lower = magazine_domain.lower().strip()
+    # Normalize the target domain so comparisons are scheme/www/slash-agnostic.
+    domain_lower = _normalize_domain(magazine_domain)
 
     # Strategy 1: standard <tr>/<td> table
     for row in page.query_selector_all('tr'):
         cells = row.query_selector_all('td')
         if len(cells) < 2:
             continue
-        # Site name is in the first cell
+        # Site name is in the first cell; normalize before comparing so that
+        # "www.blackdown.org" or "https://www.blackdown.org" both match.
         site_link = cells[0].query_selector('a')
-        site_text = (_safe_text(site_link) if site_link else _safe_text(cells[0])).strip().lower()
+        raw_text  = _safe_text(site_link) if site_link else _safe_text(cells[0])
+        site_text = _normalize_domain(raw_text)
         if site_text != domain_lower:
             continue
         # Price is in the last cell
@@ -294,7 +316,7 @@ def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
     # Strategy 2: walk from a site <a> link to its row and read last cell
     if not prices:
         for link in page.query_selector_all('td a, [class*="site"] a'):
-            if _safe_text(link).strip().lower() != domain_lower:
+            if _normalize_domain(_safe_text(link)) != domain_lower:
                 continue
             try:
                 row_el = link.evaluate_handle(
@@ -308,11 +330,11 @@ def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
             except Exception:
                 pass
 
-    # Strategy 3: scan text lines — find the line starting with the domain
+    # Strategy 3: scan text lines — find the line matching the domain
     if not prices:
         lines = body_text.splitlines()
         for i, line in enumerate(lines):
-            if line.strip().lower() == domain_lower:
+            if _normalize_domain(line.strip()) == domain_lower:
                 # Price is usually on the same line or the next few lines
                 chunk = ' '.join(lines[i:i+5])
                 val = _parse_price(chunk)
@@ -334,6 +356,12 @@ def get_price(magazine_domain: str, client_name: str, debug: bool = False) -> in
     matching client_name, or None if not found.
     Does NOT raise if the client project is missing — returns None instead.
     """
+    # Normalize early so a full URL like "https://www.blackdown.org/" is reduced
+    # to "blackdown.org" before it ever reaches the filter input or comparison logic.
+    magazine_domain = _normalize_domain(magazine_domain)
+    if debug:
+        print(f"  [linksme] normalized magazine_domain → {magazine_domain!r}")
+
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         kwargs  = load_session_kwargs("linksme")
