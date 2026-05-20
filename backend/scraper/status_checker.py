@@ -74,7 +74,7 @@ def run_status_check(debug: bool = False) -> None:
         client_name = (row.get("clients") or {}).get("name", "")
         article = {
             "id":          row["id"],
-            "magazine":    row.get("magazine") or "",
+            "magazine":    _domain(row.get("magazine") or ""),
             "client_name": client_name,
         }
         publisher = (row.get("chosen_publisher") or "").lower()
