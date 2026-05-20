@@ -79,8 +79,30 @@ def _login(page, debug: bool):
 
     page.click('button[type="submit"], button:has-text("Login"), button:has-text("Sign in")')
     _wait(page, 3000)
+
+    print(f"  [check_linksme] post-login URL:   {page.url}")
+    print(f"  [check_linksme] post-login title: {page.title()}")
+
     if _is_on_login(page):
-        raise RuntimeError("Links.me login failed — check LINKSME_EMAIL / LINKSME_PASSWORD")
+        # Grab any visible error message from the page before raising
+        error_text = ''
+        for sel in [
+            '[class*="error" i]', '[class*="alert" i]', '[class*="danger" i]',
+            '[role="alert"]', 'p.text-red', '.text-red-500',
+        ]:
+            try:
+                el = page.query_selector(sel)
+                if el:
+                    error_text = el.inner_text().strip()
+                    if error_text:
+                        break
+            except Exception:
+                pass
+        detail = f' — page says: "{error_text}"' if error_text else ''
+        raise RuntimeError(
+            f"Links.me login failed — still on login page{detail}. "
+            "Check LINKSME_EMAIL / LINKSME_PASSWORD"
+        )
 
 
 def _normalize_domain(text: str) -> str:
