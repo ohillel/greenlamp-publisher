@@ -242,9 +242,9 @@ async def email_test():
 
 @app.post("/api/check/run")
 async def manual_status_check():
-    """Manually trigger run_status_check() for testing without waiting for the scheduler."""
+    """Manually trigger run_status_check(debug=True) for testing without waiting for the scheduler."""
     try:
-        await run_in_threadpool(run_status_check)
+        await run_in_threadpool(run_status_check, True)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -140,8 +140,10 @@ def _find_report_url(page, client_name: str, debug: bool) -> str | None:
     )
     project_names = _parse_project_names(page)
 
-    if debug:
-        print(f"  [check_linksme] {len(project_names)} projects, {len(gp_hrefs)} GP links")
+    # Always log so Railway shows these even without debug=True
+    print(f"  [check_linksme] searching for client: '{client_name}'")
+    print(f"  [check_linksme] dashboard projects ({len(project_names)}): {project_names}")
+    print(f"  [check_linksme] GP hrefs found: {len(gp_hrefs)}")
 
     name_lower = client_name.lower()
 
@@ -154,16 +156,14 @@ def _find_report_url(page, client_name: str, debug: bool) -> str | None:
     for i, pname in enumerate(project_names):
         if name_lower == pname.lower() and i < len(gp_hrefs):
             url = _gp_to_report(gp_hrefs[i])
-            if debug:
-                print(f"  [check_linksme] exact match: {pname} → {url}")
+            print(f"  [check_linksme] exact match: '{pname}' → {url}")
             return url
 
     # Partial match
     for i, pname in enumerate(project_names):
         if (name_lower in pname.lower() or pname.lower() in name_lower) and i < len(gp_hrefs):
             url = _gp_to_report(gp_hrefs[i])
-            if debug:
-                print(f"  [check_linksme] partial match: {pname} → {url}")
+            print(f"  [check_linksme] partial match: '{pname}' → {url}")
             return url
 
     # Fuzzy: any word > 3 chars
@@ -171,8 +171,7 @@ def _find_report_url(page, client_name: str, debug: bool) -> str | None:
     for i, pname in enumerate(project_names):
         if any(p in pname.lower() for p in parts) and i < len(gp_hrefs):
             url = _gp_to_report(gp_hrefs[i])
-            if debug:
-                print(f"  [check_linksme] fuzzy match '{client_name}' → {pname} → {url}")
+            print(f"  [check_linksme] fuzzy match '{client_name}' → '{pname}' → {url}")
             return url
 
     # Strategy B: use report hrefs directly (same position logic)
@@ -186,12 +185,10 @@ def _find_report_url(page, client_name: str, debug: bool) -> str | None:
     for i, pname in enumerate(project_names):
         if name_lower == pname.lower() and i < len(project_report_hrefs):
             url = project_report_hrefs[i]
-            if debug:
-                print(f"  [check_linksme] strategy-B exact: {pname} → {url}")
+            print(f"  [check_linksme] strategy-B exact: '{pname}' → {url}")
             return url
 
-    if debug:
-        print(f"  [check_linksme] no report URL found for '{client_name}'")
+    print(f"  [check_linksme] NO MATCH found for client '{client_name}' among: {project_names}")
     return None
 
 
