@@ -706,268 +706,300 @@ export default function ClientPage() {
       )}
 
       {/* ── Articles ── */}
-      {visibleArticles.length === 0 ? (
-        <div className="empty-state">
-          {statusFilter !== 'all'
-            ? <p>No {STATUS_FILTERS.find(f => f.key === statusFilter)?.label.toLowerCase()} articles for this client.</p>
-            : <p>No articles yet for this client.</p>
-          }
-        </div>
-      ) : (
-        <div className="article-grid">
+      {(() => {
+        if (visibleArticles.length === 0) {
+          return (
+            <div className="empty-state">
+              {statusFilter !== 'all'
+                ? <p>No {STATUS_FILTERS.find(f => f.key === statusFilter)?.label.toLowerCase()} articles for this client.</p>
+                : <p>No articles yet for this client.</p>
+              }
+            </div>
+          )
+        }
 
-          {/* ── DENISE ── */}
-          {role === 'denise' && visibleArticles.map(article => (
-            <DeniseArticleCard
-              key={article.id}
-              article={article}
-              onDelete={deleteArticle}
-              onConfirm={confirmAndNotifyOr}
-              confirming={confirmingId === article.id}
-              deleting={deletingId === article.id}
-              isFetchingPrices={fetchingPricesId === article.id}
-              pricesDone={priceDoneIds.has(article.id)}
-              priceErrors={priceErrorsMap[article.id]}
-              isEditing={editingDeniseId === article.id}
-              editData={editingDeniseData}
-              onEditChange={handleDeniseEditChange}
-              onSaveEdit={saveDeniseEdit}
-              onStartEdit={startDeniseEdit}
-              onCancelEdit={cancelDeniseEdit}
-              savingEdit={savingDeniseEdit}
-            />
-          ))}
+        // ── Per-article card renderer (role-aware) ──────────────────────────
 
-          {/* ── OR ── */}
-          {role === 'or' && visibleArticles.map(article => {
-            const isEditing   = editingId === article.id
-            const canActOnIt  = article.status === 'submitted'
+        const renderDeniseCard = article => (
+          <DeniseArticleCard
+            key={article.id}
+            article={article}
+            onDelete={deleteArticle}
+            onConfirm={confirmAndNotifyOr}
+            confirming={confirmingId === article.id}
+            deleting={deletingId === article.id}
+            isFetchingPrices={fetchingPricesId === article.id}
+            pricesDone={priceDoneIds.has(article.id)}
+            priceErrors={priceErrorsMap[article.id]}
+            isEditing={editingDeniseId === article.id}
+            editData={editingDeniseData}
+            onEditChange={handleDeniseEditChange}
+            onSaveEdit={saveDeniseEdit}
+            onStartEdit={startDeniseEdit}
+            onCancelEdit={cancelDeniseEdit}
+            savingEdit={savingDeniseEdit}
+          />
+        )
 
-            return (
-              <div key={article.id} className={`article-card ${isEditing ? 'editing' : ''}`}>
-                <div className="card-header">
-                  <span className="card-magazine">
-                    {isEditing
-                      ? <input name="magazine" value={editData.magazine} onChange={handleEditChange} className="edit-input" placeholder="Magazine" />
-                      : (article.magazine ?? '—')
-                    }
-                  </span>
-                  <StatusBadge status={article.status} />
+        const renderOrCard = article => {
+          const isEditing  = editingId === article.id
+          const canActOnIt = article.status === 'submitted'
+          return (
+            <div key={article.id} className={`article-card ${isEditing ? 'editing' : ''}`}>
+              <div className="card-header">
+                <span className="card-magazine">
+                  {isEditing
+                    ? <input name="magazine" value={editData.magazine} onChange={handleEditChange} className="edit-input" placeholder="Magazine" />
+                    : (article.magazine ?? '—')
+                  }
+                </span>
+                <StatusBadge status={article.status} />
+              </div>
+
+              <div className="card-body">
+                <div className="card-field">
+                  <span className="cf-label">Google Doc</span>
+                  {isEditing
+                    ? <input name="google_doc_url" value={editData.google_doc_url} onChange={handleEditChange} className="edit-input" placeholder="https://docs.google.com/…" />
+                    : article.google_doc_url
+                      ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" className="doc-link">Open →</a>
+                      : <span className="cf-empty">—</span>
+                  }
                 </div>
-
-                <div className="card-body">
+                <div className="card-field-row">
                   <div className="card-field">
-                    <span className="cf-label">Google Doc</span>
+                    <span className="cf-label">Preferred publisher</span>
                     {isEditing
-                      ? <input name="google_doc_url" value={editData.google_doc_url} onChange={handleEditChange} className="edit-input" placeholder="https://docs.google.com/…" />
-                      : article.google_doc_url
-                        ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" className="doc-link">Open →</a>
-                        : <span className="cf-empty">—</span>
+                      ? <select name="preferred_publisher" value={editData.preferred_publisher} onChange={handleEditChange} className="edit-select">
+                          <option value="">—</option>
+                          {PUBLISHERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                        </select>
+                      : <span className={article.preferred_publisher ? 'pub-tag' : 'cf-empty'}>
+                          {PUB_LABEL[article.preferred_publisher] ?? article.preferred_publisher ?? '—'}
+                        </span>
                     }
-                  </div>
-                  <div className="card-field-row">
-                    <div className="card-field">
-                      <span className="cf-label">Preferred publisher</span>
-                      {isEditing
-                        ? <select name="preferred_publisher" value={editData.preferred_publisher} onChange={handleEditChange} className="edit-select">
-                            <option value="">—</option>
-                            {PUBLISHERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                          </select>
-                        : <span className={article.preferred_publisher ? 'pub-tag' : 'cf-empty'}>
-                            {PUB_LABEL[article.preferred_publisher] ?? article.preferred_publisher ?? '—'}
-                          </span>
-                      }
-                    </div>
-                    <div className="card-field">
-                      <span className="cf-label">Chosen publisher</span>
-                      {isEditing
-                        ? <select name="chosen_publisher" value={editData.chosen_publisher} onChange={handleEditChange} className="edit-select">
-                            <option value="">—</option>
-                            {PUBLISHERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                          </select>
-                        : <span className={article.chosen_publisher ? 'pub-tag chosen' : 'cf-empty'}>
-                            {PUB_LABEL[article.chosen_publisher] ?? article.chosen_publisher ?? '—'}
-                          </span>
-                      }
-                    </div>
-                  </div>
-                  <div className="card-field-row prices">
-                    <div className="card-field">
-                      <span className="cf-label">PressWhizz price</span>
-                      {isEditing
-                        ? <input name="price_presswhizz" type="number" value={editData.price_presswhizz} onChange={handleEditChange} className="edit-input" placeholder="₪" />
-                        : <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
-                      }
-                    </div>
-                    <div className="card-field">
-                      <span className="cf-label">Links.me price</span>
-                      {isEditing
-                        ? <input name="price_linksme" type="number" value={editData.price_linksme} onChange={handleEditChange} className="edit-input" placeholder="₪" />
-                        : <span className="price-val">{fmtPrice(article.price_linksme)}</span>
-                      }
-                    </div>
                   </div>
                   <div className="card-field">
-                    <span className="cf-label">Notes for Publisher</span>
+                    <span className="cf-label">Chosen publisher</span>
                     {isEditing
-                      ? <textarea
-                          name="publisher_notes"
-                          value={editData.publisher_notes}
-                          onChange={handleEditChange}
-                          className="edit-input"
-                          placeholder="Optional notes for the publisher…"
-                          rows={2}
-                          style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
-                        />
-                      : article.publisher_notes
-                        ? <span style={{ fontSize: 13, color: 'var(--text)' }}>{article.publisher_notes}</span>
-                        : <span className="cf-empty">—</span>
+                      ? <select name="chosen_publisher" value={editData.chosen_publisher} onChange={handleEditChange} className="edit-select">
+                          <option value="">—</option>
+                          {PUBLISHERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                        </select>
+                      : <span className={article.chosen_publisher ? 'pub-tag chosen' : 'cf-empty'}>
+                          {PUB_LABEL[article.chosen_publisher] ?? article.chosen_publisher ?? '—'}
+                        </span>
                     }
                   </div>
-                  {article.return_reason && !isEditing && (
-                    <div className="card-field">
-                      <span className="cf-label" style={{ color: '#dc2626' }}>Returned — reason</span>
-                      <span style={{ fontSize: 13, color: '#dc2626' }}>{article.return_reason}</span>
-                    </div>
-                  )}
-                  {saveError && isEditing && <p className="form-error" style={{ marginTop: 8 }}>{saveError}</p>}
                 </div>
-
-                <div className="card-actions" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-                  {isEditing ? (
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn-save" onClick={() => saveEdit(article.id)} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
-                      <button className="btn-ghost" onClick={cancelEdit} disabled={saving}>Cancel</button>
-                    </div>
-                  ) : approveNotesId === article.id ? (
-                    <div className="approve-notes-area">
-                      <textarea
-                        value={approveNotes}
-                        onChange={e => setApproveNotes(e.target.value)}
-                        placeholder="Optional notes for publisher…"
-                        autoFocus
+                <div className="card-field-row prices">
+                  <div className="card-field">
+                    <span className="cf-label">PressWhizz price</span>
+                    {isEditing
+                      ? <input name="price_presswhizz" type="number" value={editData.price_presswhizz} onChange={handleEditChange} className="edit-input" placeholder="₪" />
+                      : <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
+                    }
+                  </div>
+                  <div className="card-field">
+                    <span className="cf-label">Links.me price</span>
+                    {isEditing
+                      ? <input name="price_linksme" type="number" value={editData.price_linksme} onChange={handleEditChange} className="edit-input" placeholder="₪" />
+                      : <span className="price-val">{fmtPrice(article.price_linksme)}</span>
+                    }
+                  </div>
+                </div>
+                <div className="card-field">
+                  <span className="cf-label">Notes for Publisher</span>
+                  {isEditing
+                    ? <textarea
+                        name="publisher_notes"
+                        value={editData.publisher_notes}
+                        onChange={handleEditChange}
+                        className="edit-input"
+                        placeholder="Optional notes for the publisher…"
+                        rows={2}
+                        style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
                       />
-                      <div className="approve-notes-actions">
+                    : article.publisher_notes
+                      ? <span style={{ fontSize: 13, color: 'var(--text)' }}>{article.publisher_notes}</span>
+                      : <span className="cf-empty">—</span>
+                  }
+                </div>
+                {article.return_reason && !isEditing && (
+                  <div className="card-field">
+                    <span className="cf-label" style={{ color: '#dc2626' }}>Returned — reason</span>
+                    <span style={{ fontSize: 13, color: '#dc2626' }}>{article.return_reason}</span>
+                  </div>
+                )}
+                {saveError && isEditing && <p className="form-error" style={{ marginTop: 8 }}>{saveError}</p>}
+              </div>
+
+              <div className="card-actions" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                {isEditing ? (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn-save" onClick={() => saveEdit(article.id)} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+                    <button className="btn-ghost" onClick={cancelEdit} disabled={saving}>Cancel</button>
+                  </div>
+                ) : approveNotesId === article.id ? (
+                  <div className="approve-notes-area">
+                    <textarea
+                      value={approveNotes}
+                      onChange={e => setApproveNotes(e.target.value)}
+                      placeholder="Optional notes for publisher…"
+                      autoFocus
+                    />
+                    <div className="approve-notes-actions">
+                      <button
+                        className="btn-approve"
+                        style={{ marginLeft: 0 }}
+                        onClick={() => approve(article.id, approveNotes)}
+                        disabled={approving === article.id}
+                      >
+                        {approving === article.id ? 'Approving…' : 'Confirm Approve'}
+                      </button>
+                      <button className="btn-ghost" onClick={() => { setApproveNotesId(null); setApproveNotes('') }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {canActOnIt && (
+                      <>
+                        <button className="btn-edit" onClick={() => startEdit(article)}>Edit</button>
                         <button
                           className="btn-approve"
                           style={{ marginLeft: 0 }}
-                          onClick={() => approve(article.id, approveNotes)}
+                          onClick={() => { setApproveNotesId(article.id); setApproveNotes('') }}
                           disabled={approving === article.id}
                         >
-                          {approving === article.id ? 'Approving…' : 'Confirm Approve'}
+                          Approve
                         </button>
-                        <button className="btn-ghost" onClick={() => { setApproveNotesId(null); setApproveNotes('') }}>Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      {canActOnIt && (
-                        <>
-                          <button className="btn-edit" onClick={() => startEdit(article)}>Edit</button>
-                          <button
-                            className="btn-approve"
-                            style={{ marginLeft: 0 }}
-                            onClick={() => { setApproveNotesId(article.id); setApproveNotes('') }}
-                            disabled={approving === article.id}
-                          >
-                            Approve
-                          </button>
-                        </>
-                      )}
-                      <button
-                        className="btn-delete-article"
-                        onClick={() => deleteArticle(article.id)}
-                        disabled={deletingId === article.id || saving}
-                      >
-                        {deletingId === article.id ? 'Deleting…' : 'Delete'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-
-          {/* ── PUBLISHER ── */}
-          {role === 'publisher' && visibleArticles.map(article => {
-            const chosenPrice = article.chosen_publisher === 'presswhizz'
-              ? article.price_presswhizz
-              : article.chosen_publisher === 'linksme'
-                ? article.price_linksme
-                : null
-
-            return (
-              <div key={article.id} className="article-card">
-                <div className="card-header">
-                  <span className="card-magazine">{article.magazine ?? '—'}</span>
-                  <StatusBadge status={article.status} />
-                </div>
-                <div className="card-body">
-                  <div className="card-field">
-                    <span className="cf-label">Google Doc</span>
-                    {article.google_doc_url
-                      ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" className="doc-link">Open →</a>
-                      : <span className="cf-empty">—</span>}
-                  </div>
-                  <div className="card-field-row">
-                    <div className="card-field">
-                      <span className="cf-label">Publisher</span>
-                      <span className={article.chosen_publisher ? 'pub-tag chosen' : 'cf-empty'}>
-                        {PUB_LABEL[article.chosen_publisher] ?? '—'}
-                      </span>
-                    </div>
-                    {chosenPrice != null && (
-                      <div className="card-field">
-                        <span className="cf-label">Price</span>
-                        <span className="price-val highlight">{fmtPrice(chosenPrice)}</span>
-                      </div>
+                      </>
                     )}
+                    <button
+                      className="btn-delete-article"
+                      onClick={() => deleteArticle(article.id)}
+                      disabled={deletingId === article.id || saving}
+                    >
+                      {deletingId === article.id ? 'Deleting…' : 'Delete'}
+                    </button>
                   </div>
-                  {(article.price_presswhizz != null || article.price_linksme != null) && (
-                    <div className="card-field-row prices">
-                      <div className="card-field">
-                        <span className="cf-label">PressWhizz</span>
-                        <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
-                      </div>
-                      <div className="card-field">
-                        <span className="cf-label">Links.me</span>
-                        <span className="price-val">{fmtPrice(article.price_linksme)}</span>
-                      </div>
-                    </div>
-                  )}
-                  {article.publisher_notes && (
-                    <div className="card-field" style={{ marginTop: 8 }}>
-                      <div className="publisher-notes-label">Notes from Or</div>
-                      <div className="publisher-notes">{article.publisher_notes}</div>
+                )}
+              </div>
+            </div>
+          )
+        }
+
+        const renderPublisherCard = article => {
+          const chosenPrice = article.chosen_publisher === 'presswhizz'
+            ? article.price_presswhizz
+            : article.chosen_publisher === 'linksme'
+              ? article.price_linksme
+              : null
+          return (
+            <div key={article.id} className="article-card">
+              <div className="card-header">
+                <span className="card-magazine">{article.magazine ?? '—'}</span>
+                <StatusBadge status={article.status} />
+              </div>
+              <div className="card-body">
+                <div className="card-field">
+                  <span className="cf-label">Google Doc</span>
+                  {article.google_doc_url
+                    ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" className="doc-link">Open →</a>
+                    : <span className="cf-empty">—</span>}
+                </div>
+                <div className="card-field-row">
+                  <div className="card-field">
+                    <span className="cf-label">Publisher</span>
+                    <span className={article.chosen_publisher ? 'pub-tag chosen' : 'cf-empty'}>
+                      {PUB_LABEL[article.chosen_publisher] ?? '—'}
+                    </span>
+                  </div>
+                  {chosenPrice != null && (
+                    <div className="card-field">
+                      <span className="cf-label">Price</span>
+                      <span className="price-val highlight">{fmtPrice(chosenPrice)}</span>
                     </div>
                   )}
                 </div>
+                {(article.price_presswhizz != null || article.price_linksme != null) && (
+                  <div className="card-field-row prices">
+                    <div className="card-field">
+                      <span className="cf-label">PressWhizz</span>
+                      <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
+                    </div>
+                    <div className="card-field">
+                      <span className="cf-label">Links.me</span>
+                      <span className="price-val">{fmtPrice(article.price_linksme)}</span>
+                    </div>
+                  </div>
+                )}
+                {article.publisher_notes && (
+                  <div className="card-field" style={{ marginTop: 8 }}>
+                    <div className="publisher-notes-label">Notes from Or</div>
+                    <div className="publisher-notes">{article.publisher_notes}</div>
+                  </div>
+                )}
+              </div>
 
-                <div className="card-actions" style={{ flexDirection: 'column', gap: 8 }}>
-                  {article.status === 'approved' && (
-                    <>
-                      <button className="btn-send" onClick={() => markSent(article.id)} disabled={markingId === article.id || returningId === article.id}>
-                        {markingId === article.id ? 'Updating…' : 'Mark as sent to publisher'}
-                      </button>
-                      <button className="btn-return" onClick={() => returnToOr(article.id)} disabled={returningId === article.id || markingId === article.id}>
-                        {returningId === article.id ? 'Returning…' : 'Return to Or'}
-                      </button>
-                    </>
-                  )}
-                  <button
-                    className="btn-delete-article"
-                    onClick={() => deleteArticle(article.id)}
-                    disabled={deletingId === article.id || markingId === article.id || returningId === article.id}
-                  >
-                    {deletingId === article.id ? 'Deleting…' : 'Delete'}
-                  </button>
+              <div className="card-actions" style={{ flexDirection: 'column', gap: 8 }}>
+                {article.status === 'approved' && (
+                  <>
+                    <button className="btn-send" onClick={() => markSent(article.id)} disabled={markingId === article.id || returningId === article.id}>
+                      {markingId === article.id ? 'Updating…' : 'Mark as sent to publisher'}
+                    </button>
+                    <button className="btn-return" onClick={() => returnToOr(article.id)} disabled={returningId === article.id || markingId === article.id}>
+                      {returningId === article.id ? 'Returning…' : 'Return to Or'}
+                    </button>
+                  </>
+                )}
+                <button
+                  className="btn-delete-article"
+                  onClick={() => deleteArticle(article.id)}
+                  disabled={deletingId === article.id || markingId === article.id || returningId === article.id}
+                >
+                  {deletingId === article.id ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          )
+        }
+
+        const renderCard = role === 'denise'    ? renderDeniseCard
+                         : role === 'or'        ? renderOrCard
+                         : /* publisher */        renderPublisherCard
+
+        // ── Publisher split by chosen / preferred publisher ─────────────────
+        const effectivePublisher = a => a.chosen_publisher || a.preferred_publisher
+        const pwArticles  = visibleArticles.filter(a => effectivePublisher(a) === 'presswhizz')
+        const lmArticles  = visibleArticles.filter(a => effectivePublisher(a) === 'linksme')
+        const otherArticles = visibleArticles.filter(
+          a => !['presswhizz', 'linksme'].includes(effectivePublisher(a))
+        )
+        const hasBoth = pwArticles.length > 0 && lmArticles.length > 0
+
+        if (hasBoth) {
+          return (
+            <div className="clients-split" style={{ alignItems: 'flex-start' }}>
+              <div className="clients-col">
+                <div className="clients-col-title">PressWhizz</div>
+                <div className="article-grid">
+                  {pwArticles.map(renderCard)}
+                  {otherArticles.map(renderCard)}
                 </div>
               </div>
-            )
-          })}
+              <div className="clients-col">
+                <div className="clients-col-title">Links.me</div>
+                <div className="article-grid">
+                  {lmArticles.map(renderCard)}
+                </div>
+              </div>
+            </div>
+          )
+        }
 
-        </div>
-      )}
+        return <div className="article-grid">{visibleArticles.map(renderCard)}</div>
+      })()}
     </Layout>
   )
 }
