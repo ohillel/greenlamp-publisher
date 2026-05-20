@@ -209,63 +209,125 @@ def _map_publication_status(text: str) -> str | None:
     return None
 
 
-def _parse_report_page(page, magazine_domain: str, debug: bool) -> str | None:
+def _scan_one_report_page(page, domain_lower: str, page_num: int, debug: bool) -> str | None:
     """
-    Parse the Links.me Report page and return the publication status for
-    magazine_domain, or None if not found / still in progress.
+    Scan the currently-loaded report page for domain_lower.
+    Returns 'published' | 'not_published' | None.
+    Logs all domains found on the page unconditionally.
     """
     _wait(page, 2000)
-    screenshot(page, "clm_report", debug)
+    screenshot(page, f"clm_report_p{page_num}", debug)
 
+    # ── Save full HTML for offline inspection (debug only) ────────────────────
     if debug:
-        (Path(__file__).parent / "debug_screenshots" / "clm_report_text.txt").write_text(
-            page.inner_text("body")[:8000]
+        debug_dir = Path(__file__).parent / "debug_screenshots"
+        debug_dir.mkdir(exist_ok=True)
+        (debug_dir / f"clm_report_p{page_num}.html").write_text(page.content(), encoding="utf-8")
+        (debug_dir / f"clm_report_p{page_num}_text.txt").write_text(
+            page.inner_text("body")[:12000], encoding="utf-8"
         )
 
-    domain_lower = _normalize_domain(magazine_domain)
-
-    # Strategy 1: standard <tr>/<td> table
+    # ── Collect all site domains visible on this page (always logged) ─────────
+    found_domains: list[str] = []
     for row in page.query_selector_all('tr'):
         cells = row.query_selector_all('td')
         if len(cells) < 2:
             continue
+        site_link = cells[0].query_selector('a')
+        raw = _safe_text(site_link) if site_link else _safe_text(cells[0])
+        norm = _normalize_domain(raw.strip())
+        if norm:
+            found_domains.append(norm)
 
-        # Resource/site is usually the first cell
+    # Fallback: pick domains from text lines if table yielded nothing
+    if not found_domains:
+        for line in page.inner_text("body").splitlines():
+            norm = _normalize_domain(line.strip())
+            if norm and '.' in norm and len(norm) > 4:
+                found_domains.append(norm)
+
+    print(f"  [check_linksme] page {page_num} — {len(found_domains)} domains found: {found_domains}")
+
+    # ── Strategy 1: <tr>/<td> table ──────────────────────────────────────────
+    for row in page.query_selector_all('tr'):
+        cells = row.query_selector_all('td')
+        if len(cells) < 2:
+            continue
         site_link = cells[0].query_selector('a')
         site_text = (_safe_text(site_link) if site_link else _safe_text(cells[0])).strip()
         if _normalize_domain(site_text) != domain_lower:
             continue
-
-        # Publication status: scan each cell for a status-like value
         for cell in cells[1:]:
             mapped = _map_publication_status(_safe_text(cell))
             if mapped is not None:
-                if debug:
-                    print(f"  [check_linksme] table match for '{domain_lower}': {_safe_text(cell)!r} → {mapped}")
+                print(f"  [check_linksme] table match '{domain_lower}': {_safe_text(cell)!r} → {mapped}")
                 return mapped
+        print(f"  [check_linksme] '{domain_lower}' found in table — status not actionable yet")
+        return None
 
-        # Row matched domain but status not actionable
-        if debug:
-            print(f"  [check_linksme] '{domain_lower}' found in table — status not actionable yet")
-        return None  # found but not published/rejected
-
-    # Strategy 2: walk text lines
+    # ── Strategy 2: text-line scan ────────────────────────────────────────────
     body_lines = page.inner_text("body").splitlines()
     for i, line in enumerate(body_lines):
         if _normalize_domain(line.strip()) == domain_lower:
-            # Check next few lines for a status
-            window = ' '.join(body_lines[i:i + 6])
             for part in body_lines[i:i + 6]:
                 mapped = _map_publication_status(part.strip())
                 if mapped is not None:
-                    if debug:
-                        print(f"  [check_linksme] text scan match '{domain_lower}': {part.strip()!r} → {mapped}")
+                    print(f"  [check_linksme] text scan '{domain_lower}': {part.strip()!r} → {mapped}")
                     return mapped
-            return None  # found, status not actionable
+            print(f"  [check_linksme] '{domain_lower}' found in text — status not actionable yet")
+            return None
 
-    if debug:
-        print(f"  [check_linksme] '{domain_lower}' not found in report")
-    return None
+    return None   # domain not on this page
+
+
+def _parse_report_page(page, magazine_domain: str, debug: bool) -> str | None:
+    """
+    Parse the Links.me Report page (all pagination pages) and return the
+    publication status for magazine_domain, or None if not found.
+    """
+    domain_lower = _normalize_domain(magazine_domain)
+    print(f"  [check_linksme] scanning report for '{domain_lower}'…")
+
+    page_num = 1
+    while True:
+        result = _scan_one_report_page(page, domain_lower, page_num, debug)
+
+        # Found the domain — result is a status or None (found but not actionable)
+        if result is not None or _domain_was_found_this_page(page, domain_lower):
+            return result
+
+        # Try to advance to next page
+        next_btn = None
+        for sel in [
+            'a[rel="next"]',
+            'li.next:not(.disabled) a',
+            'a:has-text("Next")',
+            'a:has-text("›")',
+            'a:has-text("»")',
+        ]:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    next_btn = el
+                    break
+            except Exception:
+                pass
+
+        if not next_btn:
+            print(f"  [check_linksme] '{domain_lower}' not found after {page_num} page(s)")
+            return None
+
+        print(f"  [check_linksme] not found on page {page_num} — advancing to page {page_num + 1}")
+        next_btn.click()
+        page_num += 1
+        if page_num > 20:   # safety cap
+            print(f"  [check_linksme] pagination cap reached ({page_num} pages) — stopping")
+            return None
+
+
+def _domain_was_found_this_page(page, domain_lower: str) -> bool:
+    """Return True if domain_lower appeared anywhere in the current page text."""
+    return domain_lower in page.inner_text("body").lower()
 
 
 def check_batch(
