@@ -142,7 +142,50 @@ export default function ClientsPage() {
         <div className="empty-state">
           {search ? <p>No clients match "{search}".</p> : <p>No clients yet. Add your first one above.</p>}
         </div>
+      ) : (role === 'or' || role === 'publisher') ? (
+        /* Split layout: pending left, no-pending right */
+        <div className="clients-split">
+          {[true, false].map(wantPending => {
+            const col = visibleClients.filter(c => pendingClientIds.has(c.id) === wantPending)
+            if (col.length === 0) return null
+            return (
+              <div key={String(wantPending)} className="clients-col">
+                <div className={`clients-col-title${wantPending ? ' pending' : ''}`}>
+                  {wantPending ? 'Needs attention' : 'Up to date'}
+                </div>
+                <div className="clients-grid">
+                  {col.map(client => (
+                    <div
+                      key={client.id}
+                      className={`client-card${wantPending ? ' client-card--pending' : ''}${deletingId === client.id ? ' deleting' : ''}`}
+                      onClick={() => navigate(`/clients/${client.id}`)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={e => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
+                    >
+                      <div className="folder-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+                        </svg>
+                      </div>
+                      <span className="client-name">{client.name}</span>
+                      <button
+                        className="client-delete-btn"
+                        onClick={e => deleteClient(e, client.id, client.name)}
+                        disabled={deletingId === client.id}
+                        title="Delete client"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       ) : (
+        /* Denise and other roles: flat grid */
         <div className="clients-grid">
           {visibleClients.map(client => {
             const isPending = pendingClientIds.has(client.id)

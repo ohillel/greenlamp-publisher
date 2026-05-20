@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS articles (
     price_presswhizz    NUMERIC(10, 2),
     price_linksme       NUMERIC(10, 2),
     status              TEXT NOT NULL DEFAULT 'submitted'
-                            CHECK (status IN ('submitted', 'approved', 'sent_to_publisher', 'published', 'not_published')),
+                            CHECK (status IN ('draft', 'submitted', 'approved', 'sent_to_publisher', 'published', 'not_published')),
+    publisher_notes     TEXT,
+    return_reason       TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -65,3 +67,8 @@ CREATE INDEX IF NOT EXISTS notifications_user_role_idx   ON notifications(user_r
 CREATE INDEX IF NOT EXISTS notifications_article_id_idx  ON notifications(article_id);
 CREATE INDEX IF NOT EXISTS notifications_is_read_idx     ON notifications(is_read);
 CREATE INDEX IF NOT EXISTS profiles_role_idx             ON profiles(role);
+
+-- ── Migration: add publisher_notes and return_reason columns ─────────────────
+-- Run these once against the live Supabase DB (safe to run multiple times):
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS publisher_notes TEXT;
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS return_reason   TEXT;

@@ -147,6 +147,7 @@ _NOTIFY_MAP: dict[str, tuple[list[str], str]] = {
     "submitted": (["or"],           "New article for {client} → {magazine}"),
     "approved":  (["publisher"],    "Ready to send for {client} → {magazine}"),
     "sent":      (["or", "denise"], "Article sent for {client} → {magazine}"),
+    "returned":  (["or"],           "Article returned for {client} → {magazine}"),
 }
 
 

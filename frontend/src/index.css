@@ -971,3 +971,119 @@ body {
   margin-bottom: 20px;
   max-width: 560px;
 }
+
+/* ── Clients split layout (or / publisher) ── */
+.clients-split {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+}
+.clients-col {
+  flex: 1;
+  min-width: 0;
+}
+.clients-col-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+.clients-col-title.pending { color: #dc2626; }
+@media (max-width: 600px) {
+  .clients-split { flex-direction: column; }
+}
+
+/* ── Return-to-Or button ── */
+.btn-return {
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  margin-top: 4px;
+}
+.btn-return:hover:not(:disabled) { background: #fef3c7; border-color: #d97706; }
+.btn-return:disabled { opacity: .6; cursor: not-allowed; }
+
+/* ── Approve-with-notes inline area ── */
+.approve-notes-area {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.approve-notes-area textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.approve-notes-area textarea:focus { outline: none; border-color: var(--green); }
+.approve-notes-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Publisher notes display ── */
+.publisher-notes {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #78350f;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+.publisher-notes-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #92400e;
+  margin-bottom: 4px;
+}
+
+/* ── Denise in-card edit ── */
+.denise-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.denise-edit-field label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.denise-edit-field input,
+.denise-edit-field select {
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--surface);
+  box-sizing: border-box;
+  width: 100%;
+}
+.denise-edit-field input:focus,
+.denise-edit-field select:focus { outline: none; border-color: var(--green); }

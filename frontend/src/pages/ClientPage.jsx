@@ -35,7 +35,9 @@ const EMPTY_FORM = { google_doc_url: '', magazine: '', preferred_publisher: '' }
 const EMPTY_EDIT = {
   google_doc_url: '', magazine: '', preferred_publisher: '',
   chosen_publisher: '', price_presswhizz: '', price_linksme: '',
+  publisher_notes: '',
 }
+const EMPTY_DENISE_EDIT = { google_doc_url: '', magazine: '', preferred_publisher: '' }
 
 // ── Price comparison display ───────────────────────────────────────────────────
 
@@ -79,71 +81,109 @@ function PriceComparison({ pw, lm, pwError, lmError }) {
 function DeniseArticleCard({
   article, onDelete, onConfirm, confirming, deleting,
   isFetchingPrices, pricesDone, priceErrors,
+  isEditing, editData, onEditChange, onSaveEdit, onStartEdit, onCancelEdit, savingEdit,
 }) {
   const isDraft    = article.status === 'draft'
   const hasPrices  = article.price_presswhizz != null || article.price_linksme != null
-  // Confirm button shows once price fetch is done (success or failure)
-  const canConfirm = isDraft && pricesDone && !isFetchingPrices
+  const canConfirm = isDraft && pricesDone && !isFetchingPrices && !isEditing
 
   return (
-    <div className={`article-card ${isDraft ? 'draft' : ''}`}>
+    <div className={`article-card ${isDraft ? 'draft' : ''}${isEditing ? ' editing' : ''}`}>
       <div className="card-header">
-        <span className="card-magazine">{article.magazine ?? '—'}</span>
+        <span className="card-magazine">
+          {isEditing
+            ? <input className="edit-input" name="magazine" value={editData.magazine} onChange={onEditChange} placeholder="Magazine domain" />
+            : (article.magazine ?? '—')
+          }
+        </span>
         <StatusBadge status={article.status} />
       </div>
       <div className="card-body">
-        <div className="card-field">
-          <span className="cf-label">Google Doc</span>
-          {article.google_doc_url
-            ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" className="doc-link">Open →</a>
-            : <span className="cf-empty">—</span>}
-        </div>
-        <div className="card-field">
-          <span className="cf-label">Preferred publisher</span>
-          <span className={article.preferred_publisher ? 'pub-tag' : 'cf-empty'}>
-            {PUB_LABEL[article.preferred_publisher] ?? article.preferred_publisher ?? '—'}
-          </span>
-        </div>
-
-        {/* Price section */}
-        {isDraft && !isFetchingPrices && pricesDone && console.log(
-          '[prices] 4. PriceComparison props — pw:', article.price_presswhizz,
-          '| lm:', article.price_linksme,
-          '| errors:', JSON.stringify(priceErrors ?? null)
-        )}
-        {isDraft && (
-          isFetchingPrices ? (
-            <div className="price-fetching">
-              <span className="price-spinner" />
-              Checking prices on PressWhizz &amp; Links.me…
+        {isEditing ? (
+          <>
+            <div className="denise-edit-field">
+              <label>Google Doc URL</label>
+              <input type="url" name="google_doc_url" value={editData.google_doc_url} onChange={onEditChange} placeholder="https://docs.google.com/…" />
             </div>
-          ) : (hasPrices || pricesDone) ? (
-            <PriceComparison
-              pw={article.price_presswhizz}
-              lm={article.price_linksme}
-              pwError={priceErrors?.presswhizz}
-              lmError={priceErrors?.linksme}
-            />
-          ) : null
+            <div className="denise-edit-field">
+              <label>Preferred Publisher</label>
+              <select name="preferred_publisher" value={editData.preferred_publisher} onChange={onEditChange}>
+                <option value="">— Select —</option>
+                <option value="presswhizz">PressWhizz</option>
+                <option value="linksme">Links.me</option>
+              </select>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="card-field">
+              <span className="cf-label">Google Doc</span>
+              {article.google_doc_url
+                ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" className="doc-link">Open →</a>
+                : <span className="cf-empty">—</span>}
+            </div>
+            <div className="card-field">
+              <span className="cf-label">Preferred publisher</span>
+              <span className={article.preferred_publisher ? 'pub-tag' : 'cf-empty'}>
+                {PUB_LABEL[article.preferred_publisher] ?? article.preferred_publisher ?? '—'}
+              </span>
+            </div>
+
+            {/* Price section */}
+            {isDraft && !isFetchingPrices && pricesDone && console.log(
+              '[prices] 4. PriceComparison props — pw:', article.price_presswhizz,
+              '| lm:', article.price_linksme,
+              '| errors:', JSON.stringify(priceErrors ?? null)
+            )}
+            {isDraft && (
+              isFetchingPrices ? (
+                <div className="price-fetching">
+                  <span className="price-spinner" />
+                  Checking prices on PressWhizz &amp; Links.me…
+                </div>
+              ) : (hasPrices || pricesDone) ? (
+                <PriceComparison
+                  pw={article.price_presswhizz}
+                  lm={article.price_linksme}
+                  pwError={priceErrors?.presswhizz}
+                  lmError={priceErrors?.linksme}
+                />
+              ) : null
+            )}
+          </>
         )}
       </div>
 
       <div className="card-actions">
-        <button
-          className="btn-delete-article"
-          onClick={() => onDelete(article.id)}
-          disabled={deleting || confirming || isFetchingPrices}
-        >
-          {deleting ? 'Deleting…' : 'Delete'}
-        </button>
-        {canConfirm && (
-          <button
-            className="btn-confirm"
-            onClick={() => onConfirm(article.id, article.magazine)}
-            disabled={confirming || deleting}
-          >
-            {confirming ? 'Notifying…' : 'Confirm & Notify Or'}
-          </button>
+        {isEditing ? (
+          <>
+            <button className="btn-save" onClick={() => onSaveEdit(article.id)} disabled={savingEdit}>{savingEdit ? 'Saving…' : 'Save'}</button>
+            <button className="btn-ghost" onClick={onCancelEdit} disabled={savingEdit}>Cancel</button>
+          </>
+        ) : (
+          <>
+            {isDraft && (
+              <button className="btn-edit" onClick={() => onStartEdit(article)} disabled={deleting || confirming || isFetchingPrices}>
+                Edit
+              </button>
+            )}
+            <button
+              className="btn-delete-article"
+              onClick={() => onDelete(article.id)}
+              disabled={deleting || confirming || isFetchingPrices}
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+            {canConfirm && (
+              <button
+                className="btn-confirm"
+                onClick={() => onConfirm(article.id, article.magazine)}
+                disabled={confirming || deleting}
+              >
+                {confirming ? 'Notifying…' : 'Confirm & Notify Or'}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -181,15 +221,25 @@ export default function ClientPage() {
   const [priceDoneIds,     setPriceDoneIds]     = useState(new Set())
   const [priceErrorsMap,   setPriceErrorsMap]   = useState({})
 
+  // Denise — in-card edit for draft articles
+  const [editingDeniseId,   setEditingDeniseId]   = useState(null)
+  const [editingDeniseData, setEditingDeniseData] = useState(EMPTY_DENISE_EDIT)
+  const [savingDeniseEdit,  setSavingDeniseEdit]  = useState(false)
+
   // Or — inline edit
   const [editingId, setEditingId] = useState(null)
   const [editData,  setEditData]  = useState(EMPTY_EDIT)
   const [saving,    setSaving]    = useState(false)
   const [saveError, setSaveError] = useState('')
-  const [approving, setApproving] = useState(null)
+
+  // Or — approve with optional notes
+  const [approving,      setApproving]      = useState(null)   // id being approved
+  const [approveNotesId, setApproveNotesId] = useState(null)   // id showing notes input
+  const [approveNotes,   setApproveNotes]   = useState('')
 
   // Publisher
-  const [markingId, setMarkingId] = useState(null)
+  const [markingId,   setMarkingId]   = useState(null)
+  const [returningId, setReturningId] = useState(null)
 
   // ── Initial data fetch ───────────────────────────────────────────────────────
 
@@ -322,6 +372,38 @@ export default function ClientPage() {
     }
   }
 
+  // ── Denise: in-card edit for draft articles ─────────────────────────────────
+
+  const startDeniseEdit = article => {
+    setEditingDeniseId(article.id)
+    setEditingDeniseData({
+      google_doc_url:      article.google_doc_url      ?? '',
+      magazine:            article.magazine            ?? '',
+      preferred_publisher: article.preferred_publisher ?? '',
+    })
+  }
+
+  const cancelDeniseEdit = () => setEditingDeniseId(null)
+
+  const handleDeniseEditChange = e =>
+    setEditingDeniseData(d => ({ ...d, [e.target.name]: e.target.value }))
+
+  const saveDeniseEdit = async id => {
+    setSavingDeniseEdit(true)
+    const { error } = await supabase.from('articles').update({
+      google_doc_url:      editingDeniseData.google_doc_url      || null,
+      magazine:            editingDeniseData.magazine            || null,
+      preferred_publisher: editingDeniseData.preferred_publisher || null,
+    }).eq('id', id)
+    if (!error) {
+      setArticles(prev => prev.map(a =>
+        a.id === id ? { ...a, ...editingDeniseData } : a
+      ))
+      setEditingDeniseId(null)
+    }
+    setSavingDeniseEdit(false)
+  }
+
   // ── Denise: save draft ───────────────────────────────────────────────────────
 
   const handleFormChange = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
@@ -406,6 +488,7 @@ export default function ClientPage() {
       chosen_publisher:    article.chosen_publisher    ?? '',
       price_presswhizz:    article.price_presswhizz    ?? '',
       price_linksme:       article.price_linksme       ?? '',
+      publisher_notes:     article.publisher_notes     ?? '',
     })
   }
 
@@ -422,6 +505,7 @@ export default function ClientPage() {
       chosen_publisher:    editData.chosen_publisher    || null,
       price_presswhizz:    editData.price_presswhizz !== '' ? parseFloat(editData.price_presswhizz) : null,
       price_linksme:       editData.price_linksme     !== '' ? parseFloat(editData.price_linksme)    : null,
+      publisher_notes:     editData.publisher_notes    || null,
     }).eq('id', id)
 
     if (error) { setSaveError(error.message) }
@@ -436,17 +520,48 @@ export default function ClientPage() {
     setSaving(false)
   }
 
-  // ── Or: approve ──────────────────────────────────────────────────────────────
+  // ── Or: approve (with optional notes and preferred→chosen fallback) ──────────
 
-  const approve = async id => {
+  const approve = async (id, notes) => {
     setApproving(id)
-    const { error } = await supabase.from('articles').update({ status: 'approved' }).eq('id', id)
+    const article    = articles.find(a => a.id === id)
+    const updateData = { status: 'approved' }
+    // Default chosen_publisher to preferred_publisher if Or didn't explicitly set one
+    if (!article?.chosen_publisher && article?.preferred_publisher) {
+      updateData.chosen_publisher = article.preferred_publisher
+    }
+    if (notes) updateData.publisher_notes = notes
+    const { error } = await supabase.from('articles').update(updateData).eq('id', id)
     if (!error) {
-      const article = articles.find(a => a.id === id)
-      setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'approved' } : a))
+      setArticles(prev => prev.map(a => a.id === id ? { ...a, ...updateData } : a))
       sendNotify('approved', client?.name ?? '', article?.magazine ?? '')
     }
     setApproving(null)
+    setApproveNotesId(null)
+    setApproveNotes('')
+  }
+
+  // ── Publisher: return article to Or ─────────────────────────────────────────
+
+  const returnToOr = async id => {
+    const reason = window.prompt(
+      'Reason for returning to Or:',
+      'Too many words for Links.me',
+    )
+    if (reason === null) return   // cancelled
+    setReturningId(id)
+    const article = articles.find(a => a.id === id)
+    const { error } = await supabase.from('articles').update({
+      status:        'submitted',
+      return_reason: reason || null,
+    }).eq('id', id)
+    if (!error) {
+      setArticles(prev => prev.map(a =>
+        a.id === id ? { ...a, status: 'submitted', return_reason: reason || null } : a
+      ))
+      sendNotify('returned', client?.name ?? '', article?.magazine ?? '')
+    }
+    setReturningId(null)
   }
 
   // ── Publisher: mark sent ─────────────────────────────────────────────────────
@@ -592,6 +707,13 @@ export default function ClientPage() {
               isFetchingPrices={fetchingPricesId === article.id}
               pricesDone={priceDoneIds.has(article.id)}
               priceErrors={priceErrorsMap[article.id]}
+              isEditing={editingDeniseId === article.id}
+              editData={editingDeniseData}
+              onEditChange={handleDeniseEditChange}
+              onSaveEdit={saveDeniseEdit}
+              onStartEdit={startDeniseEdit}
+              onCancelEdit={cancelDeniseEdit}
+              savingEdit={savingDeniseEdit}
             />
           ))}
 
@@ -664,22 +786,70 @@ export default function ClientPage() {
                       }
                     </div>
                   </div>
+                  <div className="card-field">
+                    <span className="cf-label">Notes for Publisher</span>
+                    {isEditing
+                      ? <textarea
+                          name="publisher_notes"
+                          value={editData.publisher_notes}
+                          onChange={handleEditChange}
+                          className="edit-input"
+                          placeholder="Optional notes for the publisher…"
+                          rows={2}
+                          style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13 }}
+                        />
+                      : article.publisher_notes
+                        ? <span style={{ fontSize: 13, color: 'var(--text)' }}>{article.publisher_notes}</span>
+                        : <span className="cf-empty">—</span>
+                    }
+                  </div>
+                  {article.return_reason && !isEditing && (
+                    <div className="card-field">
+                      <span className="cf-label" style={{ color: '#dc2626' }}>Returned — reason</span>
+                      <span style={{ fontSize: 13, color: '#dc2626' }}>{article.return_reason}</span>
+                    </div>
+                  )}
                   {saveError && isEditing && <p className="form-error" style={{ marginTop: 8 }}>{saveError}</p>}
                 </div>
 
-                <div className="card-actions">
+                <div className="card-actions" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
                   {isEditing ? (
-                    <>
+                    <div style={{ display: 'flex', gap: 8 }}>
                       <button className="btn-save" onClick={() => saveEdit(article.id)} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
                       <button className="btn-ghost" onClick={cancelEdit} disabled={saving}>Cancel</button>
-                    </>
+                    </div>
+                  ) : approveNotesId === article.id ? (
+                    <div className="approve-notes-area">
+                      <textarea
+                        value={approveNotes}
+                        onChange={e => setApproveNotes(e.target.value)}
+                        placeholder="Optional notes for publisher…"
+                        autoFocus
+                      />
+                      <div className="approve-notes-actions">
+                        <button
+                          className="btn-approve"
+                          style={{ marginLeft: 0 }}
+                          onClick={() => approve(article.id, approveNotes)}
+                          disabled={approving === article.id}
+                        >
+                          {approving === article.id ? 'Approving…' : 'Confirm Approve'}
+                        </button>
+                        <button className="btn-ghost" onClick={() => { setApproveNotesId(null); setApproveNotes('') }}>Cancel</button>
+                      </div>
+                    </div>
                   ) : (
-                    <>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {canActOnIt && (
                         <>
                           <button className="btn-edit" onClick={() => startEdit(article)}>Edit</button>
-                          <button className="btn-approve" onClick={() => approve(article.id)} disabled={approving === article.id}>
-                            {approving === article.id ? 'Approving…' : 'Approve'}
+                          <button
+                            className="btn-approve"
+                            style={{ marginLeft: 0 }}
+                            onClick={() => { setApproveNotesId(article.id); setApproveNotes('') }}
+                            disabled={approving === article.id}
+                          >
+                            Approve
                           </button>
                         </>
                       )}
@@ -690,7 +860,7 @@ export default function ClientPage() {
                       >
                         {deletingId === article.id ? 'Deleting…' : 'Delete'}
                       </button>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
@@ -744,18 +914,29 @@ export default function ClientPage() {
                       </div>
                     </div>
                   )}
+                  {article.publisher_notes && (
+                    <div className="card-field" style={{ marginTop: 8 }}>
+                      <div className="publisher-notes-label">Notes from Or</div>
+                      <div className="publisher-notes">{article.publisher_notes}</div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="card-actions">
+                <div className="card-actions" style={{ flexDirection: 'column', gap: 8 }}>
                   {article.status === 'approved' && (
-                    <button className="btn-send" onClick={() => markSent(article.id)} disabled={markingId === article.id}>
-                      {markingId === article.id ? 'Updating…' : 'Mark as sent to publisher'}
-                    </button>
+                    <>
+                      <button className="btn-send" onClick={() => markSent(article.id)} disabled={markingId === article.id || returningId === article.id}>
+                        {markingId === article.id ? 'Updating…' : 'Mark as sent to publisher'}
+                      </button>
+                      <button className="btn-return" onClick={() => returnToOr(article.id)} disabled={returningId === article.id || markingId === article.id}>
+                        {returningId === article.id ? 'Returning…' : 'Return to Or'}
+                      </button>
+                    </>
                   )}
                   <button
                     className="btn-delete-article"
                     onClick={() => deleteArticle(article.id)}
-                    disabled={deletingId === article.id || markingId === article.id}
+                    disabled={deletingId === article.id || markingId === article.id || returningId === article.id}
                   >
                     {deletingId === article.id ? 'Deleting…' : 'Delete'}
                   </button>
