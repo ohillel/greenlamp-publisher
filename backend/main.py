@@ -137,9 +137,10 @@ async def push_subscribe(req: PushSubscribeRequest):
 
 
 class NotifyRequest(BaseModel):
-    event:       str   # 'submitted' | 'approved' | 'sent'
+    event:       str        # 'submitted' | 'approved' | 'sent' | 'returned'
     client_name: str
     magazine:    str
+    reason:      str | None = None  # optional — included in email body for 'returned'
 
 
 _NOTIFY_MAP: dict[str, tuple[list[str], str]] = {
@@ -250,11 +251,13 @@ async def notify(req: NotifyRequest):
         client=req.client_name,
         magazine=extract_domain(req.magazine),
     )
+    # For returned articles, append the reason to the email body (but not the push)
+    email_body = f"{body}\n\nReason: {req.reason}" if req.reason else body
     title = "Greenlamp Publisher"
     try:
         sb = _sb()
         await run_in_threadpool(send_push_to_roles, sb, roles, title, body)
-        await run_in_threadpool(send_email_to_roles, roles, body, body)
+        await run_in_threadpool(send_email_to_roles, roles, body, email_body)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

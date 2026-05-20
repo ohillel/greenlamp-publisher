@@ -11,8 +11,8 @@ const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-const sendNotify = (event, clientName, magazine) => {
-  const payload = { event, client_name: clientName, magazine }
+const sendNotify = (event, clientName, magazine, reason) => {
+  const payload = { event, client_name: clientName, magazine, ...(reason ? { reason } : {}) }
   console.log(`[notify] calling /api/notify`, payload, '→', `${API_BASE}/api/notify`)
   fetch(`${API_BASE}/api/notify`, {
     method:  'POST',
@@ -85,7 +85,8 @@ function DeniseArticleCard({
 }) {
   const isDraft    = article.status === 'draft'
   const hasPrices  = article.price_presswhizz != null || article.price_linksme != null
-  const canConfirm = isDraft && pricesDone && !isFetchingPrices && !isEditing
+  // Allow confirm once prices are known — either fetched in this session or already in the DB
+  const canConfirm = isDraft && (pricesDone || hasPrices) && !isFetchingPrices && !isEditing
 
   return (
     <div className={`article-card ${isDraft ? 'draft' : ''}${isEditing ? ' editing' : ''}`}>
@@ -390,16 +391,36 @@ export default function ClientPage() {
 
   const saveDeniseEdit = async id => {
     setSavingDeniseEdit(true)
+    const oldArticle     = articles.find(a => a.id === id)
+    const magazineChanged = (editingDeniseData.magazine || '') !== (oldArticle?.magazine || '')
+    const newMagazine    = editingDeniseData.magazine || null
+
     const { error } = await supabase.from('articles').update({
       google_doc_url:      editingDeniseData.google_doc_url      || null,
-      magazine:            editingDeniseData.magazine            || null,
+      magazine:            newMagazine,
       preferred_publisher: editingDeniseData.preferred_publisher || null,
+      // Clear stale prices when magazine changes so the new fetch is authoritative
+      ...(magazineChanged ? { price_presswhizz: null, price_linksme: null } : {}),
     }).eq('id', id)
+
     if (!error) {
       setArticles(prev => prev.map(a =>
-        a.id === id ? { ...a, ...editingDeniseData } : a
+        a.id === id
+          ? {
+              ...a,
+              ...editingDeniseData,
+              ...(magazineChanged ? { price_presswhizz: null, price_linksme: null } : {}),
+            }
+          : a
       ))
       setEditingDeniseId(null)
+
+      // Re-fetch prices when the magazine domain changed
+      if (magazineChanged && newMagazine) {
+        setSuccessMsg(`Magazine updated. Re-checking prices…`)
+        setTimeout(() => setSuccessMsg(''), 8000)
+        fetchPricesForArticle(id, newMagazine, client?.name ?? '')
+      }
     }
     setSavingDeniseEdit(false)
   }
@@ -559,7 +580,7 @@ export default function ClientPage() {
       setArticles(prev => prev.map(a =>
         a.id === id ? { ...a, status: 'submitted', return_reason: reason || null } : a
       ))
-      sendNotify('returned', client?.name ?? '', article?.magazine ?? '')
+      sendNotify('returned', client?.name ?? '', article?.magazine ?? '', reason || undefined)
     }
     setReturningId(null)
   }
