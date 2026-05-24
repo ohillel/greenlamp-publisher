@@ -90,6 +90,14 @@ function DeniseArticleCard({
                 {PUB_LABEL[article.preferred_publisher] ?? article.preferred_publisher ?? '—'}
               </span>
             </div>
+            {article.published_url && (
+              <div className="card-field">
+                <span className="cf-label" style={{ color: '#16a34a' }}>Published URL</span>
+                <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
+                  {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
+                </a>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -1018,6 +1026,14 @@ export default function ClientPage() {
                   <div className="card-field" style={{ marginTop: 8 }}>
                     <div className="publisher-notes-label">Notes from Or</div>
                     <div className="publisher-notes">{article.publisher_notes}</div>
+                  </div>
+                )}
+                {article.published_url && (
+                  <div className="card-field">
+                    <span className="cf-label" style={{ color: '#16a34a' }}>Published URL</span>
+                    <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
+                      {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
+                    </a>
                   </div>
                 )}
               </div>
