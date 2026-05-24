@@ -177,6 +177,8 @@ export default function ClientPage() {
 
   // Or — manual status override
   const [overridingId, setOverridingId] = useState(null)
+  const [publishUrlId, setPublishUrlId] = useState(null)  // article showing URL input
+  const [publishUrl,   setPublishUrl]   = useState('')
 
   // ── Initial data fetch ───────────────────────────────────────────────────────
 
@@ -464,13 +466,43 @@ export default function ClientPage() {
 
   // ── Or: manual status override for sent_to_publisher ───────────────────────
 
-  const manualOverride = async (id, newStatus) => {
+  const confirmPublished = async (id, url) => {
     setOverridingId(id)
     const article = articles.find(a => a.id === id)
-    const { error } = await supabase.from('articles').update({ status: newStatus }).eq('id', id)
+    const update = { status: 'published', published_url: url || null }
+    const { error } = await supabase.from('articles').update(update).eq('id', id)
     if (!error) {
-      setArticles(prev => prev.map(a => a.id === id ? { ...a, status: newStatus } : a))
-      sendNotify(newStatus, client?.name ?? '', article?.magazine ?? '')
+      setArticles(prev => prev.map(a => a.id === id ? { ...a, ...update } : a))
+      sendNotify('published', client?.name ?? '', article?.magazine ?? '')
+    } else {
+      console.error('[confirmPublished] DB error:', error)
+    }
+    setOverridingId(null)
+    setPublishUrlId(null)
+    setPublishUrl('')
+  }
+
+  const markNotPublished = async id => {
+    setOverridingId(id)
+    const article = articles.find(a => a.id === id)
+    const { error } = await supabase.from('articles').update({ status: 'not_published' }).eq('id', id)
+    if (!error) {
+      setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'not_published' } : a))
+      sendNotify('not_published', client?.name ?? '', article?.magazine ?? '')
+    } else {
+      console.error('[markNotPublished] DB error:', error)
+    }
+    setOverridingId(null)
+  }
+
+  const undoOverride = async id => {
+    setOverridingId(id)
+    const update = { status: 'sent_to_publisher', published_url: null }
+    const { error } = await supabase.from('articles').update(update).eq('id', id)
+    if (!error) {
+      setArticles(prev => prev.map(a => a.id === id ? { ...a, ...update } : a))
+    } else {
+      console.error('[undoOverride] DB error:', error)
     }
     setOverridingId(null)
   }
@@ -730,6 +762,14 @@ export default function ClientPage() {
                     <span style={{ fontSize: 13, color: '#dc2626' }}>{article.return_reason}</span>
                   </div>
                 )}
+                {article.published_url && !isEditing && (
+                  <div className="card-field">
+                    <span className="cf-label" style={{ color: '#16a34a' }}>Published URL</span>
+                    <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
+                      {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
+                    </a>
+                  </div>
+                )}
                 {saveError && isEditing && <p className="form-error" style={{ marginTop: 8 }}>{saveError}</p>}
               </div>
 
@@ -759,6 +799,29 @@ export default function ClientPage() {
                       <button className="btn-ghost" onClick={() => { setApproveNotesId(null); setApproveNotes('') }}>Cancel</button>
                     </div>
                   </div>
+                ) : publishUrlId === article.id ? (
+                  <div className="approve-notes-area">
+                    <input
+                      type="url"
+                      className="edit-input"
+                      placeholder="https://… (published article URL)"
+                      value={publishUrl}
+                      onChange={e => setPublishUrl(e.target.value)}
+                      autoFocus
+                      onKeyDown={e => { if (e.key === 'Enter') confirmPublished(article.id, publishUrl) }}
+                    />
+                    <div className="approve-notes-actions">
+                      <button
+                        className="btn-override-published"
+                        style={{ marginLeft: 0 }}
+                        onClick={() => confirmPublished(article.id, publishUrl)}
+                        disabled={overridingId === article.id}
+                      >
+                        {overridingId === article.id ? 'Saving…' : 'Confirm Published'}
+                      </button>
+                      <button className="btn-ghost" onClick={() => { setPublishUrlId(null); setPublishUrl('') }}>Cancel</button>
+                    </div>
+                  </div>
                 ) : (
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {canActOnIt && (
@@ -778,19 +841,28 @@ export default function ClientPage() {
                       <>
                         <button
                           className="btn-override-published"
-                          onClick={() => manualOverride(article.id, 'published')}
+                          onClick={() => { setPublishUrlId(article.id); setPublishUrl('') }}
                           disabled={overridingId === article.id}
                         >
-                          {overridingId === article.id ? '…' : '✓ Published'}
+                          ✓ Published
                         </button>
                         <button
                           className="btn-override-rejected"
-                          onClick={() => manualOverride(article.id, 'not_published')}
+                          onClick={() => markNotPublished(article.id)}
                           disabled={overridingId === article.id}
                         >
                           {overridingId === article.id ? '…' : '✗ Not Published'}
                         </button>
                       </>
+                    )}
+                    {(article.status === 'published' || article.status === 'not_published') && (
+                      <button
+                        className="btn-undo"
+                        onClick={() => undoOverride(article.id)}
+                        disabled={overridingId === article.id}
+                      >
+                        {overridingId === article.id ? '…' : '↩ Undo'}
+                      </button>
                     )}
                     <button
                       className="btn-delete-article"
