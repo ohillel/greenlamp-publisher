@@ -33,7 +33,6 @@ export default function ClientsPage() {
   // Or — pending articles table
   const [pendingArticles, setPendingArticles] = useState([])
   const [popup,           setPopup]           = useState(null)   // { article, x, y }
-  const [approvingId,     setApprovingId]     = useState(null)
 
   const inputRef = useRef(null)
   const navigate = useNavigate()
@@ -59,7 +58,7 @@ export default function ClientsPage() {
     const { data } = await supabase
       .from('articles')
       .select('id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, price_presswhizz, price_linksme, clients(name)')
-      .in('status', ['submitted', 'approved'])
+      .eq('status', 'submitted')
       .order('created_at', { ascending: true })
     const articles = data ?? []
     setPendingArticles(articles)
@@ -102,31 +101,6 @@ export default function ClientsPage() {
     document.addEventListener('click', close)
     return () => document.removeEventListener('click', close)
   }, [popup])
-
-  // ── Or: approve article from the table ───────────────────────────────────────
-
-  const approveArticle = async article => {
-    setApprovingId(article.id)
-    setPopup(null)
-    const updateData = { status: 'approved' }
-    if (!article.chosen_publisher && article.preferred_publisher) {
-      updateData.chosen_publisher = article.preferred_publisher
-    }
-    const { error } = await supabase.from('articles').update(updateData).eq('id', article.id)
-    if (!error) {
-      setPendingArticles(prev => prev.map(a => a.id === article.id ? { ...a, ...updateData } : a))
-      fetch(`${API_BASE}/api/notify`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          event:       'approved',
-          client_name: article.clients?.name ?? '',
-          magazine:    article.magazine ?? '',
-        }),
-      }).catch(() => {})
-    }
-    setApprovingId(null)
-  }
 
   // ── Mutations ────────────────────────────────────────────────────────────────
 
@@ -231,8 +205,13 @@ export default function ClientsPage() {
         </div>
       )}
 
-      {/* ── Or layout: pending table + up-to-date folders ── */}
-      {role === 'or' && !loading && (
+      {/* ── Or layout: pending table + up-to-date folders (or flat grid when none pending) ── */}
+      {role === 'or' && !loading && pendingArticles.length === 0 && (
+        <div className="clients-grid">
+          {visibleClients.map(renderClientFolder)}
+        </div>
+      )}
+      {role === 'or' && !loading && pendingArticles.length > 0 && (
         <div className="or-clients-layout">
 
           {/* Left: pending articles table */}
@@ -244,11 +223,7 @@ export default function ClientsPage() {
               )}
             </div>
 
-            {pendingArticles.length === 0 ? (
-              <div className="empty-state" style={{ padding: '24px 0' }}>
-                <p>All caught up!</p>
-              </div>
-            ) : (
+            {pendingArticles.length > 0 && (
               <div className="pending-table-wrap">
                 <table className="pending-articles-table">
                   <thead>
@@ -274,7 +249,7 @@ export default function ClientsPage() {
                       return (
                         <tr
                           key={article.id}
-                          className={`pending-article-row status-${article.status}${approvingId === article.id ? ' approving' : ''}`}
+                          className={`pending-article-row status-${article.status}`}
                           onClick={e => {
                             e.stopPropagation()
                             if (popup?.article.id === article.id) { setPopup(null); return }
@@ -298,7 +273,7 @@ export default function ClientsPage() {
                             </span>
                           </td>
                           <td className="col-prices">
-                            {pw == null && lm == null && article.status === 'submitted'
+                            {pw == null && lm == null
                               ? <span className="price-fetching-inline"><span className="price-spinner" /> Fetching…</span>
                               : <span>{priceStr}</span>
                             }
@@ -424,15 +399,15 @@ export default function ClientsPage() {
           style={{ position: 'fixed', top: popup.y + 4, left: popup.x, zIndex: 1000 }}
           onClick={e => e.stopPropagation()}
         >
-          {popup.article.status === 'submitted' && (
-            <button
-              className="row-popup-btn row-popup-approve"
-              onClick={() => approveArticle(popup.article)}
-              disabled={approvingId === popup.article.id}
-            >
-              {approvingId === popup.article.id ? 'Approving…' : 'Approve'}
-            </button>
-          )}
+          <button
+            className="row-popup-btn row-popup-approve"
+            onClick={() => {
+              setPopup(null)
+              navigate(`/clients/${popup.article.client_id}?approve=${popup.article.id}`)
+            }}
+          >
+            Approve
+          </button>
           <button
             className="row-popup-btn"
             onClick={() => { setPopup(null); navigate(`/clients/${popup.article.client_id}`) }}

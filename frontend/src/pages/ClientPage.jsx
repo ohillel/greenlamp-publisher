@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import Layout from '../components/Layout'
 import StatusBadge from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
@@ -132,9 +132,10 @@ function DeniseArticleCard({
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function ClientPage() {
-  const { clientId } = useParams()
-  const { role }     = useAuth()
-  const navigate     = useNavigate()
+  const { clientId }    = useParams()
+  const { role }        = useAuth()
+  const navigate        = useNavigate()
+  const [searchParams]  = useSearchParams()
 
   const [client,   setClient]   = useState(null)
   const [articles, setArticles] = useState([])
@@ -194,6 +195,22 @@ export default function ClientPage() {
     }
     fetchAll()
   }, [clientId, role])
+
+  // ── Auto-open approve notes when navigated from the dashboard ───────────────
+
+  useEffect(() => {
+    const approveId = searchParams.get('approve')
+    if (!approveId || articles.length === 0) return
+    const article = articles.find(a => a.id === approveId && a.status === 'submitted')
+    if (article) {
+      setApproveNotesId(approveId)
+      setApproveNotes('')
+      // Scroll the card into view after a brief tick so it's rendered
+      setTimeout(() => {
+        document.getElementById(`article-card-${approveId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 100)
+    }
+  }, [searchParams, articles])
 
   // ── Realtime subscription ────────────────────────────────────────────────────
 
@@ -618,7 +635,7 @@ export default function ClientPage() {
             && article.price_presswhizz == null
             && article.price_linksme    == null
           return (
-            <div key={article.id} className={`article-card ${isEditing ? 'editing' : ''}`}>
+            <div key={article.id} id={`article-card-${article.id}`} className={`article-card ${isEditing ? 'editing' : ''}`}>
               <div className="card-header">
                 <span className="card-magazine">
                   {isEditing
