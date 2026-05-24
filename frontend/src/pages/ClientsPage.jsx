@@ -6,11 +6,6 @@ import { useAuth } from '../context/AuthContext'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// Which article status triggers the red indicator per role (null = no indicator)
-const PENDING_STATUS = {
-  publisher: 'approved',
-}
-
 const PUB_LABEL = { presswhizz: 'PressWhizz', linksme: 'Links.me' }
 
 const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
@@ -18,6 +13,85 @@ const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 const fmtDate = dateStr => {
   if (!dateStr) return '—'
   return new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
+// ── Shared: all-clients folder grid (with optional pending highlights) ────────
+
+function ClientFoldersGrid({ clients, pendingClientIds, deletingId, onNavigate, onDelete }) {
+  return (
+    <div className="clients-grid">
+      {clients.map(client => {
+        const isPending = pendingClientIds.has(client.id)
+        return (
+          <div
+            key={client.id}
+            className={`client-card${isPending ? ' client-card--pending' : ''}${deletingId === client.id ? ' deleting' : ''}`}
+            onClick={() => onNavigate(client.id)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => e.key === 'Enter' && onNavigate(client.id)}
+          >
+            <div className="folder-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+              </svg>
+            </div>
+            <span className="client-name">{client.name}</span>
+            <button
+              className="client-delete-btn"
+              onClick={e => onDelete(e, client.id, client.name)}
+              disabled={deletingId === client.id}
+              title="Delete client"
+            >
+              ×
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Shared: table + folders split layout ──────────────────────────────────────
+
+function TaskTableLayout({
+  articles, pendingClientIds, clients, deletingId,
+  onNavigate, onDelete, onRowClick, popup, setPopup,
+  tableTitle, tableColumns, renderRow, renderPopup,
+}) {
+  return (
+    <div className="or-clients-layout">
+      {/* Left: task table */}
+      <div className="or-pending-col">
+        <div className="clients-col-title pending">
+          {tableTitle}
+          <span className="pending-count">{articles.length}</span>
+        </div>
+        <div className="pending-table-wrap">
+          <table className="pending-articles-table">
+            <thead>
+              <tr>{tableColumns.map(col => <th key={col}>{col}</th>)}</tr>
+            </thead>
+            <tbody>
+              {articles.map((article, i) => renderRow(article, i))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Right: all client folders */}
+      <div className="or-uptodate-col">
+        <div className="clients-col-title">All clients</div>
+        <ClientFoldersGrid
+          clients={clients}
+          pendingClientIds={pendingClientIds}
+          deletingId={deletingId}
+          onNavigate={onNavigate}
+          onDelete={onDelete}
+        />
+      </div>
+    </div>
+  )
 }
 
 export default function ClientsPage() {
@@ -30,15 +104,16 @@ export default function ClientsPage() {
   const [deletingId,       setDeletingId]       = useState(null)
   const [pendingClientIds, setPendingClientIds] = useState(new Set())
 
-  // Or — pending articles table
-  const [pendingArticles, setPendingArticles] = useState([])
-  const [popup,           setPopup]           = useState(null)   // { article, x, y }
+  // Or — submitted articles table
+  const [pendingArticles,   setPendingArticles]   = useState([])
+  // Publisher — approved articles table
+  const [publisherArticles, setPublisherArticles] = useState([])
+
+  const [popup, setPopup] = useState(null)   // { article, x, y, role }
 
   const inputRef = useRef(null)
   const navigate = useNavigate()
   const { role } = useAuth()
-
-  const pendingStatus = PENDING_STATUS[role] ?? null
 
   // ── Fetch clients ────────────────────────────────────────────────────────────
 
@@ -51,7 +126,7 @@ export default function ClientsPage() {
     if (adding) inputRef.current?.focus()
   }, [adding])
 
-  // ── Or: fetch pending articles (submitted + approved) with full data ──────────
+  // ── Or: fetch submitted articles ─────────────────────────────────────────────
 
   const refreshOrArticles = useCallback(async () => {
     if (role !== 'or') return
@@ -67,40 +142,53 @@ export default function ClientsPage() {
 
   useEffect(() => { refreshOrArticles() }, [refreshOrArticles])
 
-  // ── Publisher: pending client indicators ─────────────────────────────────────
+  // ── Publisher: fetch approved articles ───────────────────────────────────────
 
-  const refreshPending = useCallback(async () => {
-    if (!pendingStatus) return
+  const refreshPublisherArticles = useCallback(async () => {
+    if (role !== 'publisher') return
     const { data } = await supabase
       .from('articles')
-      .select('client_id')
-      .eq('status', pendingStatus)
-    if (data) setPendingClientIds(new Set(data.map(r => r.client_id)))
-  }, [pendingStatus])
+      .select('id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, clients(name)')
+      .eq('status', 'approved')
+      .order('created_at', { ascending: true })
+    const articles = data ?? []
+    setPublisherArticles(articles)
+    setPendingClientIds(new Set(articles.map(a => a.client_id)))
+  }, [role])
 
-  useEffect(() => { refreshPending() }, [refreshPending])
+  useEffect(() => { refreshPublisherArticles() }, [refreshPublisherArticles])
 
-  // Realtime: keep indicators accurate
+  // ── Realtime: keep tables accurate ───────────────────────────────────────────
+
   useEffect(() => {
-    if (role !== 'or' && !pendingStatus) return
+    if (role !== 'or' && role !== 'publisher') return
     const channel = supabase
       .channel('articles-pending-indicators')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'articles' }, () => {
         if (role === 'or') refreshOrArticles()
-        else refreshPending()
+        else refreshPublisherArticles()
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [role, pendingStatus, refreshOrArticles, refreshPending])
+  }, [role, refreshOrArticles, refreshPublisherArticles])
 
   // ── Close popup on outside click ─────────────────────────────────────────────
 
   useEffect(() => {
     if (!popup) return
-    const close = e => { setPopup(null) }
+    const close = () => setPopup(null)
     document.addEventListener('click', close)
     return () => document.removeEventListener('click', close)
   }, [popup])
+
+  // ── Row click handler (shared) ───────────────────────────────────────────────
+
+  const handleRowClick = (e, article) => {
+    e.stopPropagation()
+    if (popup?.article.id === article.id) { setPopup(null); return }
+    const rect = e.currentTarget.getBoundingClientRect()
+    setPopup({ article, x: rect.left, y: rect.bottom })
+  }
 
   // ── Mutations ────────────────────────────────────────────────────────────────
 
@@ -129,38 +217,73 @@ export default function ClientsPage() {
     setDeletingId(null)
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render helpers ───────────────────────────────────────────────────────────
 
   const q = search.trim().toLowerCase()
   const visibleClients = q
     ? clients.filter(c => c.name.toLowerCase().includes(q))
     : clients
 
-  const renderClientFolder = client => (
-    <div
-      key={client.id}
-      className={`client-card${deletingId === client.id ? ' deleting' : ''}`}
-      onClick={() => navigate(`/clients/${client.id}`)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={e => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
-    >
-      <div className="folder-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
-        </svg>
-      </div>
-      <span className="client-name">{client.name}</span>
-      <button
-        className="client-delete-btn"
-        onClick={e => deleteClient(e, client.id, client.name)}
-        disabled={deletingId === client.id}
-        title="Delete client"
-      >
-        ×
-      </button>
-    </div>
-  )
+  const folderProps = {
+    clients: visibleClients,
+    pendingClientIds,
+    deletingId,
+    onNavigate: id => navigate(`/clients/${id}`),
+    onDelete: deleteClient,
+  }
+
+  // Or table row
+  const renderOrRow = (article, i) => {
+    const effPub = article.chosen_publisher || article.preferred_publisher
+    const pw = article.price_presswhizz
+    const lm = article.price_linksme
+    const priceStr = (pw == null && lm == null)
+      ? null
+      : [pw != null && `PressWhizz: ${fmtPrice(pw)}`, lm != null && `Links.me: ${fmtPrice(lm)}`]
+          .filter(Boolean).join(' | ')
+    return (
+      <tr key={article.id} className="pending-article-row status-submitted" onClick={e => handleRowClick(e, article)}>
+        <td className="col-num">{i + 1}</td>
+        <td className="col-client">{article.clients?.name ?? '—'}</td>
+        <td className="col-date">{fmtDate(article.created_at)}</td>
+        <td className="col-magazine">{article.magazine ?? '—'}</td>
+        <td className="col-doc">
+          {article.google_doc_url
+            ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="doc-link">Doc ↗</a>
+            : <span className="cf-empty">—</span>}
+        </td>
+        <td className="col-publisher">
+          <span className={effPub ? 'pub-tag' : 'cf-empty'}>{PUB_LABEL[effPub] ?? '—'}</span>
+        </td>
+        <td className="col-prices">
+          {priceStr == null
+            ? <span className="price-fetching-inline"><span className="price-spinner" /> Fetching…</span>
+            : <span>{priceStr}</span>}
+        </td>
+      </tr>
+    )
+  }
+
+  // Publisher table row
+  const renderPublisherRow = (article, i) => {
+    const effPub = article.chosen_publisher || article.preferred_publisher
+    return (
+      <tr key={article.id} className="pending-article-row status-approved" onClick={e => handleRowClick(e, article)}>
+        <td className="col-num">{i + 1}</td>
+        <td className="col-client">{article.clients?.name ?? '—'}</td>
+        <td className="col-magazine">{article.magazine ?? '—'}</td>
+        <td className="col-doc">
+          {article.google_doc_url
+            ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="doc-link">Doc ↗</a>
+            : <span className="cf-empty">—</span>}
+        </td>
+        <td className="col-publisher">
+          <span className={effPub ? 'pub-tag' : 'cf-empty'}>{PUB_LABEL[effPub] ?? '—'}</span>
+        </td>
+        <td className="col-date">{fmtDate(article.created_at)}</td>
+      </tr>
+    )
+  }
 
   return (
     <Layout title="Clients">
@@ -190,243 +313,65 @@ export default function ClientsPage() {
         )}
       </div>
 
-      {/* ── Search (non-Or roles) ── */}
-      {!loading && clients.length > 0 && role !== 'or' && (
-        <div className="clients-search-wrap">
-          <input
-            className="clients-search"
-            type="search"
-            placeholder="Search clients…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
+      {loading && <div className="loading-inline">Loading…</div>}
+
+      {/* ── Or layout ── */}
+      {!loading && role === 'or' && pendingArticles.length === 0 && (
+        <ClientFoldersGrid {...folderProps} />
+      )}
+      {!loading && role === 'or' && pendingArticles.length > 0 && (
+        <TaskTableLayout
+          articles={pendingArticles}
+          tableTitle="Needs attention"
+          tableColumns={['#', 'Client', 'Submitted', 'Magazine', 'Doc', 'Publisher', 'Prices']}
+          renderRow={renderOrRow}
+          {...folderProps}
+        />
       )}
 
-      {/* ── Or layout: pending table + up-to-date folders (or flat grid when none pending) ── */}
-      {role === 'or' && !loading && pendingArticles.length === 0 && (
-        <div className="clients-grid">
-          {visibleClients.map(renderClientFolder)}
-        </div>
+      {/* ── Publisher layout ── */}
+      {!loading && role === 'publisher' && publisherArticles.length === 0 && (
+        <ClientFoldersGrid {...folderProps} />
       )}
-      {role === 'or' && !loading && pendingArticles.length > 0 && (
-        <div className="or-clients-layout">
-
-          {/* Left: pending articles table */}
-          <div className="or-pending-col">
-            <div className="clients-col-title pending">
-              Needs attention
-              {pendingArticles.length > 0 && (
-                <span className="pending-count">{pendingArticles.length}</span>
-              )}
-            </div>
-
-            {pendingArticles.length > 0 && (
-              <div className="pending-table-wrap">
-                <table className="pending-articles-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Client</th>
-                      <th>Submitted</th>
-                      <th>Magazine</th>
-                      <th>Doc</th>
-                      <th>Publisher</th>
-                      <th>Prices</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pendingArticles.map((article, i) => {
-                      const effPub = article.chosen_publisher || article.preferred_publisher
-                      const pw = article.price_presswhizz
-                      const lm = article.price_linksme
-                      const priceStr = (pw == null && lm == null)
-                        ? (article.status === 'submitted' ? 'Fetching…' : '—')
-                        : [pw != null && `PressWhizz: ${fmtPrice(pw)}`, lm != null && `Links.me: ${fmtPrice(lm)}`]
-                            .filter(Boolean).join(' | ')
-                      return (
-                        <tr
-                          key={article.id}
-                          className={`pending-article-row status-${article.status}`}
-                          onClick={e => {
-                            e.stopPropagation()
-                            if (popup?.article.id === article.id) { setPopup(null); return }
-                            const rect = e.currentTarget.getBoundingClientRect()
-                            setPopup({ article, x: rect.left, y: rect.bottom })
-                          }}
-                        >
-                          <td className="col-num">{i + 1}</td>
-                          <td className="col-client">{article.clients?.name ?? '—'}</td>
-                          <td className="col-date">{fmtDate(article.created_at)}</td>
-                          <td className="col-magazine">{article.magazine ?? '—'}</td>
-                          <td className="col-doc">
-                            {article.google_doc_url
-                              ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="doc-link">Doc ↗</a>
-                              : <span className="cf-empty">—</span>
-                            }
-                          </td>
-                          <td className="col-publisher">
-                            <span className={effPub ? 'pub-tag' : 'cf-empty'}>
-                              {PUB_LABEL[effPub] ?? '—'}
-                            </span>
-                          </td>
-                          <td className="col-prices">
-                            {pw == null && lm == null
-                              ? <span className="price-fetching-inline"><span className="price-spinner" /> Fetching…</span>
-                              : <span>{priceStr}</span>
-                            }
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Right: all client folders (pending ones highlighted) */}
-          <div className="or-uptodate-col">
-            <div className="clients-col-title">All clients</div>
-            <div className="clients-grid">
-              {visibleClients.map(client => {
-                const isPending = pendingClientIds.has(client.id)
-                return (
-                  <div
-                    key={client.id}
-                    className={`client-card${isPending ? ' client-card--pending' : ''}${deletingId === client.id ? ' deleting' : ''}`}
-                    onClick={() => navigate(`/clients/${client.id}`)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={e => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
-                  >
-                    <div className="folder-icon">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
-                      </svg>
-                    </div>
-                    <span className="client-name">{client.name}</span>
-                    <button
-                      className="client-delete-btn"
-                      onClick={e => deleteClient(e, client.id, client.name)}
-                      disabled={deletingId === client.id}
-                      title="Delete client"
-                    >
-                      ×
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Publisher layout: pending + up-to-date folders ── */}
-      {role === 'publisher' && !loading && (
-        visibleClients.length === 0 ? (
-          <div className="empty-state">
-            {search ? <p>No clients match "{search}".</p> : <p>No clients yet.</p>}
-          </div>
-        ) : (
-          <div className="clients-split">
-            {[true, false].map(wantPending => {
-              const col = visibleClients.filter(c => pendingClientIds.has(c.id) === wantPending)
-              if (col.length === 0) return null
-              return (
-                <div key={String(wantPending)} className="clients-col">
-                  <div className={`clients-col-title${wantPending ? ' pending' : ''}`}>
-                    {wantPending ? 'Needs attention' : 'Up to date'}
-                  </div>
-                  <div className="clients-grid">
-                    {col.map(client => (
-                      <div
-                        key={client.id}
-                        className={`client-card${wantPending ? ' client-card--pending' : ''}${deletingId === client.id ? ' deleting' : ''}`}
-                        onClick={() => navigate(`/clients/${client.id}`)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={e => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
-                      >
-                        <div className="folder-icon">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
-                          </svg>
-                        </div>
-                        <span className="client-name">{client.name}</span>
-                        <button
-                          className="client-delete-btn"
-                          onClick={e => deleteClient(e, client.id, client.name)}
-                          disabled={deletingId === client.id}
-                          title="Delete client"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )
+      {!loading && role === 'publisher' && publisherArticles.length > 0 && (
+        <TaskTableLayout
+          articles={publisherArticles}
+          tableTitle="To send"
+          tableColumns={['#', 'Client', 'Magazine', 'Doc', 'Publisher', 'Submitted']}
+          renderRow={renderPublisherRow}
+          {...folderProps}
+        />
       )}
 
       {/* ── Denise and other roles: flat grid ── */}
-      {role !== 'or' && role !== 'publisher' && (
-        loading ? (
-          <div className="loading-inline">Loading…</div>
-        ) : visibleClients.length === 0 ? (
+      {!loading && role !== 'or' && role !== 'publisher' && (
+        visibleClients.length === 0 ? (
           <div className="empty-state">
             {search ? <p>No clients match "{search}".</p> : <p>No clients yet. Add your first one above.</p>}
           </div>
         ) : (
-          <div className="clients-grid">
-            {visibleClients.map(client => (
-              <div
-                key={client.id}
-                className={`client-card${deletingId === client.id ? ' deleting' : ''}`}
-                onClick={() => navigate(`/clients/${client.id}`)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
-              >
-                <div className="folder-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
-                  </svg>
-                </div>
-                <span className="client-name">{client.name}</span>
-                <button
-                  className="client-delete-btn"
-                  onClick={e => deleteClient(e, client.id, client.name)}
-                  disabled={deletingId === client.id}
-                  title="Delete client"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
+          <ClientFoldersGrid {...folderProps} />
         )
       )}
 
-      {/* ── Row popup ── */}
+      {/* ── Row action popup ── */}
       {popup && (
         <div
           className="row-action-popup"
           style={{ position: 'fixed', top: popup.y + 4, left: popup.x, zIndex: 1000 }}
           onClick={e => e.stopPropagation()}
         >
-          <button
-            className="row-popup-btn row-popup-approve"
-            onClick={() => {
-              setPopup(null)
-              navigate(`/clients/${popup.article.client_id}?approve=${popup.article.id}`)
-            }}
-          >
-            Approve
-          </button>
+          {role === 'or' && (
+            <button
+              className="row-popup-btn row-popup-approve"
+              onClick={() => {
+                setPopup(null)
+                navigate(`/clients/${popup.article.client_id}?approve=${popup.article.id}`)
+              }}
+            >
+              Approve
+            </button>
+          )}
           <button
             className="row-popup-btn"
             onClick={() => { setPopup(null); navigate(`/clients/${popup.article.client_id}`) }}
