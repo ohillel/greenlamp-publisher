@@ -273,6 +273,41 @@ async def notify(req: NotifyRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── User switcher (Or only) ───────────────────────────────────────────────────
+
+# Hard-coded allow-list — only these two accounts can be switched into
+_SWITCH_TARGETS = {"denise@greenlamp.co", "office@greenlamp.co"}
+
+class SwitchUserRequest(BaseModel):
+    target_email: str
+
+
+@app.post("/api/admin/switch-user")
+async def switch_user(req: SwitchUserRequest):
+    """
+    Generate a one-time magic-link for the target user so Or can instantly
+    switch into their account without knowing their password.
+    Only allows switching to the hard-coded allow-list above.
+    """
+    if req.target_email not in _SWITCH_TARGETS:
+        raise HTTPException(status_code=403, detail="Not an allowed switch target.")
+    try:
+        sb   = _sb()
+        resp = sb.auth.admin.generate_link({
+            "type":  "magiclink",
+            "email": req.target_email,
+        })
+        # gotrue-py ≥ 2.x returns a GenerateLinkResponse with a .properties attribute
+        action_link = getattr(getattr(resp, "properties", resp), "action_link", None)
+        if not action_link:
+            raise ValueError(f"Unexpected generate_link response: {resp!r}")
+        return {"action_link": action_link}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── User management ───────────────────────────────────────────────────────────
 
 class ChangePasswordRequest(BaseModel):
