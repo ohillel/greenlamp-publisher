@@ -3,11 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth, useAuthProfile } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
 const SWITCH_TARGETS = [
-  { email: 'denise@greenlamp.co',  initial: 'D', label: 'Switch to Denise', color: '#7c3aed' },
-  { email: 'office@greenlamp.co',  initial: 'E', label: 'Switch to Eden',   color: '#0369a1' },
+  { email: 'denise@greenlamp.co', password: 'Greenlamp1!', initial: 'D', label: 'Switch to Denise', color: '#7c3aed' },
+  { email: 'office@greenlamp.co', password: 'Greenlamp1!', initial: 'E', label: 'Switch to Eden',   color: '#0369a1' },
 ]
 
 function UserSwitcher() {
@@ -18,23 +16,11 @@ function UserSwitcher() {
     if (switchingTo) return
     setSwitchingTo(target.email)
     try {
-      const res  = await fetch(`${API_BASE}/api/admin/switch-user`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ target_email: target.email }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || 'Switch failed')
-
-      // Inject the tokens directly into the Supabase client — fires onAuthStateChange
-      // with the new user's session, no redirect or login screen needed.
-      const { error } = await supabase.auth.setSession({
-        access_token:  data.access_token,
-        refresh_token: data.refresh_token,
+      const { error } = await supabase.auth.signInWithPassword({
+        email:    target.email,
+        password: target.password,
       })
       if (error) throw error
-
-      // Navigate to the clients page as the new user
       navigate('/clients')
     } catch (err) {
       console.error('[switch-user]', err)
