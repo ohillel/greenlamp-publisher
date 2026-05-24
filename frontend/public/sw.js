@@ -4,6 +4,7 @@ self.addEventListener('push', event => {
     self.registration.showNotification(data.title || 'Greenlamp Publisher', {
       body: data.body || '',
       icon: '/favicon.svg',
+      requireInteraction: true,
     })
   )
 })
