@@ -14,45 +14,58 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 async function registerPush(userId) {
   try {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      console.log('[push] not supported in this browser')
+      console.log('[push] browser does not support service workers or PushManager')
       return
     }
 
     const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY
     if (!vapidKey) {
-      console.warn('[push] VITE_VAPID_PUBLIC_KEY is not set — skipping subscription')
+      console.warn('[push] VITE_VAPID_PUBLIC_KEY not set — skipping')
       return
     }
 
+    // Check permission without prompting first so we can log the current state
+    console.log('[push] current Notification.permission:', Notification.permission)
+    if (Notification.permission === 'denied') {
+      console.warn('[push] permission is denied — Or must re-enable in browser settings (chrome://settings/content/notifications)')
+      return
+    }
     const permission = await Notification.requestPermission()
-    console.log('[push] notification permission:', permission)
+    console.log('[push] permission after requestPermission():', permission)
     if (permission !== 'granted') return
 
     const registration = await navigator.serviceWorker.register('/sw.js')
     await navigator.serviceWorker.ready
-    console.log('[push] service worker ready')
+    console.log('[push] service worker ready — active SW state:', registration.active?.state)
 
     // Convert base64url VAPID public key to Uint8Array
-    const padding   = '='.repeat((4 - vapidKey.length % 4) % 4)
-    const base64    = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/')
-    const rawKey    = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+    const padding = '='.repeat((4 - vapidKey.length % 4) % 4)
+    const base64  = (vapidKey + padding).replace(/-/g, '+').replace(/_/g, '/')
+    const rawKey  = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
 
-    // Reuse existing subscription if there is one — avoids creating a new
-    // endpoint on every login and accumulating stale rows in the DB.
+    // Always unsubscribe first so we get a guaranteed-fresh endpoint from the
+    // push service. Stale endpoints (e.g. after a SW update or a browser
+    // push-service rotation) cause silent 410 delivery failures on the backend.
+    const existing = await registration.pushManager.getSubscription()
+    if (existing) {
+      console.log('[push] unsubscribing stale endpoint:', existing.endpoint.slice(-50))
+      await existing.unsubscribe()
+    }
+
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly:      true,
       applicationServerKey: rawKey,
     })
-    console.log('[push] subscribed, posting to server…')
+    console.log('[push] new subscription endpoint:', subscription.endpoint.slice(-50))
 
     const res = await fetch(`${API_BASE}/api/push/subscribe`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ user_id: userId, subscription: subscription.toJSON() }),
     })
-    console.log('[push] /api/push/subscribe response:', res.status)
+    console.log('[push] /api/push/subscribe →', res.status, res.ok ? 'OK' : 'FAILED')
   } catch (err) {
-    console.warn('[push] registration failed:', err)
+    console.warn('[push] registerPush failed:', err)
   }
 }
 
