@@ -3,14 +3,25 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth, useAuthProfile } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 
-const SWITCH_TARGETS = [
-  { email: 'denise@greenlamp.co', password: 'Greenlamp1!', initial: 'D', label: 'Switch to Denise', color: '#7c3aed' },
-  { email: 'office@greenlamp.co', password: 'Greenlamp1!', initial: 'E', label: 'Switch to Eden',   color: '#0369a1' },
-]
+const ACCOUNTS = {
+  or:        { email: 'seojobisrael@gmail.com', password: 'Greenlamp1!', initial: 'O', label: 'Switch to Or',    color: '#16a34a' },
+  denise:    { email: 'denise@greenlamp.co',    password: 'Greenlamp1!', initial: 'D', label: 'Switch to Denise', color: '#7c3aed' },
+  publisher: { email: 'office@greenlamp.co',    password: 'Greenlamp1!', initial: 'E', label: 'Switch to Eden',   color: '#0369a1' },
+}
 
-function UserSwitcher() {
+// Which accounts each role can switch into
+const SWITCH_TARGETS_BY_ROLE = {
+  or:        [ACCOUNTS.denise, ACCOUNTS.publisher],
+  denise:    [ACCOUNTS.or],
+  publisher: [ACCOUNTS.or],
+}
+
+function UserSwitcher({ role }) {
   const [switchingTo, setSwitchingTo] = useState(null)
   const navigate = useNavigate()
+
+  const targets = SWITCH_TARGETS_BY_ROLE[role] ?? []
+  if (targets.length === 0) return null
 
   const handleSwitch = async (target) => {
     if (switchingTo) return
@@ -30,7 +41,7 @@ function UserSwitcher() {
 
   return (
     <div className="user-switcher" title="Switch account">
-      {SWITCH_TARGETS.map(target => (
+      {targets.map(target => (
         <button
           key={target.email}
           className="user-switch-btn"
@@ -59,11 +70,9 @@ export default function Layout({ title, children }) {
           <span className="logo-dot" /> Greenlamp Publisher
         </span>
         <div className="topbar-right">
+          <UserSwitcher role={role} />
           {role === 'or' && (
-            <>
-              <UserSwitcher />
-              <Link to="/users" className="topbar-nav-link">Users</Link>
-            </>
+            <Link to="/users" className="topbar-nav-link">Users</Link>
           )}
           <span className="topbar-email">{user?.email}</span>
           <button className="btn-signout" onClick={signOut}>Sign out</button>
