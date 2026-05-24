@@ -285,23 +285,54 @@ class SwitchUserRequest(BaseModel):
 @app.post("/api/admin/switch-user")
 async def switch_user(req: SwitchUserRequest):
     """
-    Generate a one-time magic-link for the target user so Or can instantly
-    switch into their account without knowing their password.
+    Create a live session for the target user via the Supabase admin API and
+    return the access + refresh tokens directly.  The frontend calls
+    supabase.auth.setSession() with these tokens — no redirect, no login screen.
     Only allows switching to the hard-coded allow-list above.
     """
+    import httpx
+
     if req.target_email not in _SWITCH_TARGETS:
         raise HTTPException(status_code=403, detail="Not an allowed switch target.")
     try:
-        sb   = _sb()
-        resp = sb.auth.admin.generate_link({
-            "type":  "magiclink",
-            "email": req.target_email,
-        })
-        # gotrue-py ≥ 2.x returns a GenerateLinkResponse with a .properties attribute
-        action_link = getattr(getattr(resp, "properties", resp), "action_link", None)
-        if not action_link:
-            raise ValueError(f"Unexpected generate_link response: {resp!r}")
-        return {"action_link": action_link}
+        sb = _sb()
+
+        # 1. Resolve email → user ID from the profiles table (RLS bypassed by service role)
+        profile = (
+            sb.from_("profiles")
+            .select("id")
+            .eq("email", req.target_email)
+            .single()
+            .execute()
+        )
+        user_id = (profile.data or {}).get("id")
+        if not user_id:
+            raise HTTPException(status_code=404, detail=f"No profile found for {req.target_email!r}")
+
+        # 2. Create a session for that user via the Supabase auth admin REST endpoint
+        supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
+        service_key  = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{supabase_url}/auth/v1/admin/users/{user_id}/session",
+                headers={
+                    "Authorization": f"Bearer {service_key}",
+                    "apikey":        service_key,
+                },
+            )
+
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Supabase session creation failed ({resp.status_code}): {resp.text}",
+            )
+
+        data = resp.json()
+        return {
+            "access_token":  data["access_token"],
+            "refresh_token": data["refresh_token"],
+        }
     except HTTPException:
         raise
     except Exception as e:

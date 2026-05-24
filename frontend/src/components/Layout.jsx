@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth, useAuthProfile } from '../context/AuthContext'
+import { supabase } from '../lib/supabase'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -11,6 +12,7 @@ const SWITCH_TARGETS = [
 
 function UserSwitcher() {
   const [switchingTo, setSwitchingTo] = useState(null)
+  const navigate = useNavigate()
 
   const handleSwitch = async (target) => {
     if (switchingTo) return
@@ -23,8 +25,17 @@ function UserSwitcher() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || 'Switch failed')
-      // Navigate to the magic link — Supabase consumes it and redirects back to the app
-      window.location.href = data.action_link
+
+      // Inject the tokens directly into the Supabase client — fires onAuthStateChange
+      // with the new user's session, no redirect or login screen needed.
+      const { error } = await supabase.auth.setSession({
+        access_token:  data.access_token,
+        refresh_token: data.refresh_token,
+      })
+      if (error) throw error
+
+      // Navigate to the clients page as the new user
+      navigate('/clients')
     } catch (err) {
       console.error('[switch-user]', err)
       setSwitchingTo(null)
