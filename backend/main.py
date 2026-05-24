@@ -355,8 +355,8 @@ async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
 
 # ── User switcher (Or only) ───────────────────────────────────────────────────
 
-# Hard-coded allow-list — only these two accounts can be switched into
-_SWITCH_TARGETS = {"denise@greenlamp.co", "office@greenlamp.co"}
+# Hard-coded allow-list — accounts that can be switched into via admin session
+_SWITCH_TARGETS = {"denise@greenlamp.co", "office@greenlamp.co", "seojobisrael@gmail.com"}
 
 class SwitchUserRequest(BaseModel):
     target_email: str
@@ -371,28 +371,35 @@ async def switch_user(req: SwitchUserRequest):
     Returns access_token + refresh_token; frontend calls setSession() directly.
     Only allows switching to the hard-coded allow-list above.
     """
+    print(f"[switch-user] received request for target_email={req.target_email!r}")
     if req.target_email not in _SWITCH_TARGETS:
+        print(f"[switch-user] REJECTED — not in allow-list")
         raise HTTPException(status_code=403, detail="Not an allowed switch target.")
     try:
         sb = _sb()
 
         # Step 1: generate the OTP — admin API, no email is dispatched
+        print(f"[switch-user] calling generate_link for {req.target_email!r}")
         link_resp = await run_in_threadpool(
             sb.auth.admin.generate_link,
             {"type": "magiclink", "email": req.target_email},
         )
         hashed_token = link_resp.properties.hashed_token
+        print(f"[switch-user] got hashed_token: {bool(hashed_token)}")
 
         # Step 2: redeem the token server-side to get a real session
+        print(f"[switch-user] calling verify_otp")
         session_resp = await run_in_threadpool(
             sb.auth.verify_otp,
             {"token_hash": hashed_token, "type": "magiclink"},
         )
 
         session = session_resp.session
+        print(f"[switch-user] session present: {bool(session)}")
         if not session:
             raise ValueError(f"verify_otp returned no session (response: {session_resp!r})")
 
+        print(f"[switch-user] success — returning tokens for {req.target_email!r}")
         return {
             "access_token":  session.access_token,
             "refresh_token": session.refresh_token,

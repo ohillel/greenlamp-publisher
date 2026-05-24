@@ -167,6 +167,13 @@ body {
 }
 .user-switch-btn:hover:not(:disabled) { opacity: .85; transform: scale(1.1); }
 .user-switch-btn:disabled { opacity: .5; cursor: not-allowed; }
+.user-switch-error {
+  font-size: 12px;
+  font-weight: 700;
+  color: #dc2626;
+  cursor: default;
+  title: attr(title);
+}
 
 /* ── App shell (authenticated views) ── */
 .app-shell {

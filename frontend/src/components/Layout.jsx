@@ -21,6 +21,7 @@ const SWITCH_TARGETS_BY_ROLE = {
 
 function UserSwitcher({ role }) {
   const [switchingTo, setSwitchingTo] = useState(null)
+  const [switchError,  setSwitchError]  = useState('')
   const navigate = useNavigate()
 
   const targets = SWITCH_TARGETS_BY_ROLE[role] ?? []
@@ -29,10 +30,11 @@ function UserSwitcher({ role }) {
   const handleSwitch = async (target) => {
     if (switchingTo) return
     setSwitchingTo(target.email)
+    setSwitchError('')
     try {
       if (target.useAdminSwitch) {
         // Or's account uses Gmail OAuth — create session via backend admin API
-        console.log('[switch-user] calling backend for', target.email)
+        console.log('[switch-user] POSTing to', `${API_BASE}/api/admin/switch-user`, 'for', target.email)
         const res = await fetch(`${API_BASE}/api/admin/switch-user`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -40,12 +42,12 @@ function UserSwitcher({ role }) {
         })
         console.log('[switch-user] HTTP status:', res.status)
         const body = await res.json()
-        console.log('[switch-user] response body:', body)
-        if (!res.ok) throw new Error(`switch-user failed: ${res.status} — ${JSON.stringify(body)}`)
+        console.log('[switch-user] full response body:', JSON.stringify(body))
+        if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`)
         const { access_token, refresh_token } = body
         console.log('[switch-user] access_token present:', !!access_token, '| refresh_token present:', !!refresh_token)
         const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token })
-        console.log('[switch-user] setSession result — data:', sessionData, '| error:', sessionError)
+        console.log('[switch-user] setSession data:', JSON.stringify(sessionData), '| error:', sessionError)
         if (sessionError) throw sessionError
       } else {
         const { error } = await supabase.auth.signInWithPassword({
@@ -56,13 +58,14 @@ function UserSwitcher({ role }) {
       }
       navigate('/clients')
     } catch (err) {
-      console.error('[switch-user]', err)
+      console.error('[switch-user] FAILED:', err)
+      setSwitchError(err.message || 'Switch failed')
       setSwitchingTo(null)
     }
   }
 
   return (
-    <div className="user-switcher" title="Switch account">
+    <div className="user-switcher">
       {targets.map(target => (
         <button
           key={target.email}
@@ -75,6 +78,9 @@ function UserSwitcher({ role }) {
           {switchingTo === target.email ? '…' : target.initial}
         </button>
       ))}
+      {switchError && (
+        <span className="user-switch-error" title={switchError}>!</span>
+      )}
     </div>
   )
 }
