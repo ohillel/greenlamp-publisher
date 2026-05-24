@@ -337,6 +337,15 @@ body {
 .article-card:hover      { box-shadow: 0 2px 12px rgba(0,0,0,.06); }
 .article-card.editing    { border-color: var(--green); }
 
+@keyframes card-highlight-pulse {
+  0%   { box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.5); border-color: var(--green); }
+  60%  { box-shadow: 0 0 0 6px rgba(45, 106, 79, 0.2); border-color: var(--green); }
+  100% { box-shadow: none; border-color: var(--border); }
+}
+.article-card.card-highlighted {
+  animation: card-highlight-pulse 2.5s ease-out forwards;
+}
+
 .card-header {
   display: flex;
   align-items: center;

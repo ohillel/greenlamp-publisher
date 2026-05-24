@@ -165,7 +165,10 @@ class NotifyRequest(BaseModel):
     client_name: str
     magazine:    str
     reason:      str | None = None  # optional — included in email body for 'returned'
-    article_id:  str | None = None  # for 'submitted' — triggers background price fetch
+    article_id:  str | None = None  # triggers background price fetch on 'submitted'; used for deep link
+    client_id:   str | None = None  # used to build the email deep link
+
+_APP_URL = "https://greenlamp-publisher.vercel.app"
 
 
 _NOTIFY_MAP: dict[str, tuple[list[str], str]] = {
@@ -295,6 +298,14 @@ async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
         sb = _sb()
         await run_in_threadpool(send_push_to_roles, sb, roles, title, body)
 
+        # Build the deep link directly to the article card
+        deep_link: str | None = None
+        if req.article_id and req.client_id:
+            deep_link = (
+                f"{_APP_URL}/clients/{req.client_id}"
+                f"?article={req.article_id}"
+            )
+
         # For 'published' events, look up the published URL and client Google Doc
         # and include them as extra links in the email.
         extra_links: list[dict] = []
@@ -326,7 +337,7 @@ async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
                 print(f"[notify] could not fetch extra links for published event: {link_err}")
 
         await run_in_threadpool(send_email_to_roles, roles, body, email_body,
-                                extra_links or None)
+                                extra_links or None, deep_link)
 
         # When an article is submitted, kick off price fetching in the background
         # so Or sees prices already populated when he opens the article.

@@ -37,11 +37,14 @@ def send_email_to_roles(
     subject: str,
     body_text: str,
     extra_links: list[dict] | None = None,
+    deep_link: str | None = None,
 ) -> None:
     """
     Send an email to every address mapped from `roles` using the Gmail API.
     Silently skips if GOOGLE_TOKEN_JSON is not configured.
 
+    deep_link:   if provided, the main CTA button links directly to the article
+                 instead of the generic app URL.
     extra_links: optional list of {"url": str, "label": str} rendered as
                  additional link buttons in the HTML email and plain-text URLs.
     """
@@ -70,18 +73,24 @@ def send_email_to_roles(
                 )
                 extra_plain += f"\n{label}: {url}"
 
+    cta_url   = deep_link or APP_URL
+    cta_label = "View Article →" if deep_link else "Open Greenlamp Publisher →"
+
     html = f"""\
 <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a1a1a">
   <p style="font-size:16px;margin:0 0 20px">{body_text}</p>
-  <a href="{APP_URL}"
+  <a href="{cta_url}"
      style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;
             padding:10px 20px;border-radius:6px;font-size:14px;font-weight:500">
-    Open Greenlamp Publisher →
+    {cta_label}
   </a><br>
   {extra_html}
 </div>
 """
-    plain_text = body_text + extra_plain
+    plain_text = body_text
+    if deep_link:
+        plain_text += f"\n\nView Article: {deep_link}"
+    plain_text += extra_plain
 
     try:
         service = _gmail_service()

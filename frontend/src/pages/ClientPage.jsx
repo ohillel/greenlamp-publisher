@@ -11,11 +11,12 @@ const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-const sendNotify = (event, clientName, magazine, reason, articleId) => {
+const sendNotify = (event, clientName, magazine, reason, articleId, clientId) => {
   const payload = {
     event, client_name: clientName, magazine,
-    ...(reason    ? { reason }              : {}),
+    ...(reason    ? { reason }                : {}),
     ...(articleId ? { article_id: articleId } : {}),
+    ...(clientId  ? { client_id:  clientId  } : {}),
   }
   fetch(`${API_BASE}/api/notify`, {
     method:  'POST',
@@ -41,7 +42,7 @@ const EMPTY_DENISE_EDIT = { google_doc_url: '', magazine: '', preferred_publishe
 // ── Denise article card ────────────────────────────────────────────────────────
 
 function DeniseArticleCard({
-  article, onDelete, onConfirm, confirming, deleting,
+  article, id, onDelete, onConfirm, confirming, deleting,
   isEditing, editData, onEditChange, onSaveEdit, onStartEdit, onCancelEdit, savingEdit,
 }) {
   const isDraft    = article.status === 'draft'
@@ -49,7 +50,7 @@ function DeniseArticleCard({
   const canConfirm = isDraft && !!article.magazine && !!article.preferred_publisher && !isEditing
 
   return (
-    <div className={`article-card ${isDraft ? 'draft' : ''}${isEditing ? ' editing' : ''}`}>
+    <div id={id} className={`article-card ${isDraft ? 'draft' : ''}${isEditing ? ' editing' : ''}`}>
       <div className="card-header">
         <span className="card-magazine">
           {isEditing
@@ -220,6 +221,20 @@ export default function ClientPage() {
     }
   }, [searchParams, articles])
 
+  // ── Scroll + highlight when navigated via email deep link ────────────────────
+
+  useEffect(() => {
+    const articleId = searchParams.get('article')
+    if (!articleId || articles.length === 0) return
+    setTimeout(() => {
+      const card = document.getElementById(`article-card-${articleId}`)
+      if (!card) return
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      card.classList.add('card-highlighted')
+      setTimeout(() => card.classList.remove('card-highlighted'), 2500)
+    }, 100)
+  }, [searchParams, articles])
+
   // ── Realtime subscription ────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -372,7 +387,7 @@ export default function ClientPage() {
       if (error) throw error
 
       setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'submitted' } : a))
-      sendNotify('submitted', client?.name ?? '', magazine, undefined, id)
+      sendNotify('submitted', client?.name ?? '', magazine, undefined, id, clientId)
       setSuccessMsg(`"${magazine}" sent to Or for review.`)
       setTimeout(() => setSuccessMsg(''), 6000)
     } catch (err) {
@@ -440,7 +455,7 @@ export default function ClientPage() {
     const { error } = await supabase.from('articles').update(updateData).eq('id', id)
     if (!error) {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, ...updateData } : a))
-      sendNotify('approved', client?.name ?? '', article?.magazine ?? '')
+      sendNotify('approved', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
     }
     setApproving(null)
     setApproveNotesId(null)
@@ -465,7 +480,7 @@ export default function ClientPage() {
       setArticles(prev => prev.map(a =>
         a.id === id ? { ...a, status: 'submitted', return_reason: reason || null } : a
       ))
-      sendNotify('returned', client?.name ?? '', article?.magazine ?? '', reason || undefined)
+      sendNotify('returned', client?.name ?? '', article?.magazine ?? '', reason || undefined, id, clientId)
     }
     setReturningId(null)
   }
@@ -490,7 +505,7 @@ export default function ClientPage() {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, ...update } : a))
       setPublishUrlId(null)
       setPublishUrl('')
-      sendNotify('published', client?.name ?? '', article?.magazine ?? '', undefined, id)
+      sendNotify('published', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
     } else {
       // Keep input open so Or can see the error and retry
       setPublishUrlError(error.message || 'DB update failed — check console')
@@ -504,7 +519,7 @@ export default function ClientPage() {
     const { error } = await supabase.from('articles').update({ status: 'not_published' }).eq('id', id)
     if (!error) {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'not_published' } : a))
-      sendNotify('not_published', client?.name ?? '', article?.magazine ?? '')
+      sendNotify('not_published', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
     } else {
       console.error('[markNotPublished] DB error:', error)
     }
@@ -531,7 +546,7 @@ export default function ClientPage() {
     if (!error) {
       const article = articles.find(a => a.id === id)
       setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'sent_to_publisher' } : a))
-      sendNotify('sent', client?.name ?? '', article?.magazine ?? '')
+      sendNotify('sent', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
     }
     setMarkingId(null)
   }
@@ -717,6 +732,7 @@ export default function ClientPage() {
         const renderDeniseCard = article => (
           <DeniseArticleCard
             key={article.id}
+            id={`article-card-${article.id}`}
             article={article}
             onDelete={deleteArticle}
             onConfirm={confirmAndNotifyOr}
@@ -960,7 +976,7 @@ export default function ClientPage() {
               ? article.price_linksme
               : null
           return (
-            <div key={article.id} className="article-card">
+            <div key={article.id} id={`article-card-${article.id}`} className="article-card">
               <div className="card-header">
                 <span className="card-magazine">{article.magazine ?? '—'}</span>
                 <StatusBadge status={article.status} />
