@@ -32,15 +32,21 @@ function UserSwitcher({ role }) {
     try {
       if (target.useAdminSwitch) {
         // Or's account uses Gmail OAuth — create session via backend admin API
+        console.log('[switch-user] calling backend for', target.email)
         const res = await fetch(`${API_BASE}/api/admin/switch-user`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ target_email: target.email }),
         })
-        if (!res.ok) throw new Error(`switch-user failed: ${res.status}`)
-        const { access_token, refresh_token } = await res.json()
-        const { error } = await supabase.auth.setSession({ access_token, refresh_token })
-        if (error) throw error
+        console.log('[switch-user] HTTP status:', res.status)
+        const body = await res.json()
+        console.log('[switch-user] response body:', body)
+        if (!res.ok) throw new Error(`switch-user failed: ${res.status} — ${JSON.stringify(body)}`)
+        const { access_token, refresh_token } = body
+        console.log('[switch-user] access_token present:', !!access_token, '| refresh_token present:', !!refresh_token)
+        const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token })
+        console.log('[switch-user] setSession result — data:', sessionData, '| error:', sessionError)
+        if (sessionError) throw sessionError
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email:    target.email,
