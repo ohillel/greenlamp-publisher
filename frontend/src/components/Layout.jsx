@@ -3,11 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth, useAuthProfile } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-
 const ACCOUNTS = {
-  // Or uses Gmail OAuth — no password; session is created server-side via admin API
-  or:        { email: 'seojobisrael@gmail.com', useAdminSwitch: true,  initial: 'O', label: 'Switch to Or',     color: '#16a34a' },
+  or:        { email: 'seojobisrael@gmail.com', password: 'Greenlamp1!', initial: 'O', label: 'Switch to Or',     color: '#16a34a' },
   denise:    { email: 'denise@greenlamp.co',    password: 'Greenlamp1!', initial: 'D', label: 'Switch to Denise', color: '#7c3aed' },
   publisher: { email: 'office@greenlamp.co',    password: 'Greenlamp1!', initial: 'E', label: 'Switch to Eden',   color: '#0369a1' },
 }
@@ -32,30 +29,11 @@ function UserSwitcher({ role }) {
     setSwitchingTo(target.email)
     setSwitchError('')
     try {
-      if (target.useAdminSwitch) {
-        // Or's account uses Gmail OAuth — create session via backend admin API
-        console.log('[switch-user] POSTing to', `${API_BASE}/api/admin/switch-user`, 'for', target.email)
-        const res = await fetch(`${API_BASE}/api/admin/switch-user`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ target_email: target.email }),
-        })
-        console.log('[switch-user] HTTP status:', res.status)
-        const body = await res.json()
-        console.log('[switch-user] full response body:', JSON.stringify(body))
-        if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`)
-        const { access_token, refresh_token } = body
-        console.log('[switch-user] access_token present:', !!access_token, '| refresh_token present:', !!refresh_token)
-        const { data: sessionData, error: sessionError } = await supabase.auth.setSession({ access_token, refresh_token })
-        console.log('[switch-user] setSession data:', JSON.stringify(sessionData), '| error:', sessionError)
-        if (sessionError) throw sessionError
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email:    target.email,
-          password: target.password,
-        })
-        if (error) throw error
-      }
+      const { error } = await supabase.auth.signInWithPassword({
+        email:    target.email,
+        password: target.password,
+      })
+      if (error) throw error
       navigate('/clients')
     } catch (err) {
       console.error('[switch-user] FAILED:', err)
