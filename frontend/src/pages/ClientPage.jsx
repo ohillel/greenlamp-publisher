@@ -11,18 +11,17 @@ const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-const sendNotify = (event, clientName, magazine, reason) => {
-  const payload = { event, client_name: clientName, magazine, ...(reason ? { reason } : {}) }
-  console.log(`[notify] calling /api/notify`, payload, '→', `${API_BASE}/api/notify`)
+const sendNotify = (event, clientName, magazine, reason, articleId) => {
+  const payload = {
+    event, client_name: clientName, magazine,
+    ...(reason    ? { reason }              : {}),
+    ...(articleId ? { article_id: articleId } : {}),
+  }
   fetch(`${API_BASE}/api/notify`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(payload),
-  })
-    .then(res => res.json().then(body => {
-      console.log(`[notify] response ${res.status}:`, body)
-    }))
-    .catch(err => console.warn('[notify] fetch failed:', err))
+  }).catch(err => console.warn('[notify] fetch failed:', err))
 }
 
 const PUBLISHERS = [
@@ -39,54 +38,15 @@ const EMPTY_EDIT = {
 }
 const EMPTY_DENISE_EDIT = { google_doc_url: '', magazine: '', preferred_publisher: '' }
 
-// ── Price comparison display ───────────────────────────────────────────────────
-
-function PriceComparison({ pw, lm, pwError, lmError }) {
-  const hasPw = pw != null
-  const hasLm = lm != null
-  let winner = null
-  if (hasPw && hasLm) winner = pw <= lm ? 'presswhizz' : 'linksme'
-
-  return (
-    <div className="price-comparison">
-      <div className={`price-comp-row${winner === 'presswhizz' ? ' cheaper' : ''}`}>
-        <span className="comp-label">PressWhizz</span>
-        <span className="comp-val">
-          {hasPw ? fmtPrice(pw) : <span className="comp-na">{pwError ? 'Error' : 'Not found'}</span>}
-        </span>
-        {winner === 'presswhizz' && <span className="comp-badge">Cheaper</span>}
-      </div>
-      <div className={`price-comp-row${winner === 'linksme' ? ' cheaper' : ''}`}>
-        <span className="comp-label">Links.me</span>
-        <span className="comp-val">
-          {hasLm
-            ? fmtPrice(lm)
-            : <span className="comp-na">
-                {lmError
-                  ? (lmError.includes('no project') || lmError.includes("could not find project")
-                      ? 'No project found for this client'
-                      : 'Error')
-                  : 'Not found in catalog'}
-              </span>
-          }
-        </span>
-        {winner === 'linksme' && <span className="comp-badge">Cheaper</span>}
-      </div>
-    </div>
-  )
-}
-
 // ── Denise article card ────────────────────────────────────────────────────────
 
 function DeniseArticleCard({
   article, onDelete, onConfirm, confirming, deleting,
-  isFetchingPrices, pricesDone, priceErrors,
   isEditing, editData, onEditChange, onSaveEdit, onStartEdit, onCancelEdit, savingEdit,
 }) {
   const isDraft    = article.status === 'draft'
-  const hasPrices  = article.price_presswhizz != null || article.price_linksme != null
-  // Allow confirm once prices are known — either fetched in this session or already in the DB
-  const canConfirm = isDraft && (pricesDone || hasPrices) && !isFetchingPrices && !isEditing
+  // Confirm is available once the required fields are filled — no price check needed
+  const canConfirm = isDraft && !!article.magazine && !!article.preferred_publisher && !isEditing
 
   return (
     <div className={`article-card ${isDraft ? 'draft' : ''}${isEditing ? ' editing' : ''}`}>
@@ -129,28 +89,6 @@ function DeniseArticleCard({
                 {PUB_LABEL[article.preferred_publisher] ?? article.preferred_publisher ?? '—'}
               </span>
             </div>
-
-            {/* Price section */}
-            {isDraft && !isFetchingPrices && pricesDone && console.log(
-              '[prices] 4. PriceComparison props — pw:', article.price_presswhizz,
-              '| lm:', article.price_linksme,
-              '| errors:', JSON.stringify(priceErrors ?? null)
-            )}
-            {isDraft && (
-              isFetchingPrices ? (
-                <div className="price-fetching">
-                  <span className="price-spinner" />
-                  Checking prices on PressWhizz &amp; Links.me…
-                </div>
-              ) : (hasPrices || pricesDone) ? (
-                <PriceComparison
-                  pw={article.price_presswhizz}
-                  lm={article.price_linksme}
-                  pwError={priceErrors?.presswhizz}
-                  lmError={priceErrors?.linksme}
-                />
-              ) : null
-            )}
           </>
         )}
       </div>
@@ -164,14 +102,14 @@ function DeniseArticleCard({
         ) : (
           <>
             {isDraft && (
-              <button className="btn-edit" onClick={() => onStartEdit(article)} disabled={deleting || confirming || isFetchingPrices}>
+              <button className="btn-edit" onClick={() => onStartEdit(article)} disabled={deleting || confirming}>
                 Edit
               </button>
             )}
             <button
               className="btn-delete-article"
               onClick={() => onDelete(article.id)}
-              disabled={deleting || confirming || isFetchingPrices}
+              disabled={deleting || confirming}
             >
               {deleting ? 'Deleting…' : 'Delete'}
             </button>
@@ -215,12 +153,6 @@ export default function ClientPage() {
   // Denise — per-card actions
   const [confirmingId, setConfirmingId] = useState(null)
   const [deletingId,   setDeletingId]   = useState(null)
-
-  // Denise — price fetching: which article is currently being fetched,
-  // which have completed, and any errors returned per article
-  const [fetchingPricesId, setFetchingPricesId] = useState(null)
-  const [priceDoneIds,     setPriceDoneIds]     = useState(new Set())
-  const [priceErrorsMap,   setPriceErrorsMap]   = useState({})
 
   // Denise — in-card edit for draft articles
   const [editingDeniseId,   setEditingDeniseId]   = useState(null)
@@ -311,71 +243,6 @@ export default function ClientPage() {
     return () => { supabase.removeChannel(channel) }
   }, [clientId])
 
-  // ── Denise: fetch prices from backend scraper ───────────────────────────────
-
-  const fetchPricesForArticle = async (articleId, magazine, clientName) => {
-    // Clear stale prices in local state only — do NOT write nulls to Supabase here,
-    // because that would fire a realtime event that can arrive *after* we save the
-    // fresh prices and wipe them back to null (race condition).
-    setArticles(prev => prev.map(a =>
-      a.id === articleId
-        ? { ...a, price_presswhizz: null, price_linksme: null }
-        : a
-    ))
-
-    setFetchingPricesId(articleId)
-    try {
-      console.log('[prices] 0. calling API with:', { magazine, client_name: clientName })
-      const res = await fetch(`${API_BASE}/api/prices`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ magazine, client_name: clientName }),
-      })
-      if (!res.ok) throw new Error(`Server error ${res.status}`)
-      const data = await res.json()
-
-      // 1. Raw API response
-      console.log('[prices] 1. raw API response:', JSON.stringify(data))
-      console.log('[prices]    data.presswhizz =', data.presswhizz, '| typeof:', typeof data.presswhizz)
-      console.log('[prices]    data.linksme    =', data.linksme,    '| typeof:', typeof data.linksme)
-
-      // 2. What gets saved to Supabase
-      const supabasePayload = {
-        price_presswhizz: data.presswhizz ?? null,
-        price_linksme:    data.linksme    ?? null,
-      }
-      console.log('[prices] 2. saving to Supabase:', JSON.stringify(supabasePayload))
-      const { error: sbError } = await supabase.from('articles').update(supabasePayload).eq('id', articleId)
-      console.log('[prices]    Supabase update error:', sbError ?? 'none')
-
-      // 3. Article object after save
-      setArticles(prev => {
-        const updated = prev.map(a =>
-          a.id === articleId
-            ? { ...a, price_presswhizz: data.presswhizz ?? null, price_linksme: data.linksme ?? null }
-            : a
-        )
-        const article = updated.find(a => a.id === articleId)
-        console.log('[prices] 3. article after setArticles:',
-          article
-            ? `price_presswhizz=${article.price_presswhizz} price_linksme=${article.price_linksme}`
-            : '(not found in list)')
-        return updated
-      })
-
-      if (data.errors) {
-        console.log('[prices]    data.errors:', JSON.stringify(data.errors))
-        setPriceErrorsMap(prev => ({ ...prev, [articleId]: data.errors }))
-      }
-    } catch (err) {
-      console.error('[prices] ERROR:', err)
-      setPriceErrorsMap(prev => ({ ...prev, [articleId]: { general: err.message } }))
-    } finally {
-      setFetchingPricesId(null)
-      setPriceDoneIds(prev => new Set([...prev, articleId]))
-    }
-  }
-
   // ── Denise: in-card edit for draft articles ─────────────────────────────────
 
   const startDeniseEdit = article => {
@@ -417,13 +284,6 @@ export default function ClientPage() {
           : a
       ))
       setEditingDeniseId(null)
-
-      // Re-fetch prices when the magazine domain changed
-      if (magazineChanged && newMagazine) {
-        setSuccessMsg(`Magazine updated. Re-checking prices…`)
-        setTimeout(() => setSuccessMsg(''), 8000)
-        fetchPricesForArticle(id, newMagazine, client?.name ?? '')
-      }
     }
     setSavingDeniseEdit(false)
   }
@@ -456,11 +316,8 @@ export default function ClientPage() {
       setArticles(prev => [article, ...prev])
       setForm(EMPTY_FORM)
       setShowForm(false)
-      setSuccessMsg(`"${magazine}" saved. Fetching prices…`)
-      setTimeout(() => setSuccessMsg(''), 8000)
-
-      // Kick off price scraping in the background — don't await
-      fetchPricesForArticle(article.id, magazine, clientName)
+      setSuccessMsg(`"${magazine}" saved as draft.`)
+      setTimeout(() => setSuccessMsg(''), 5000)
     } catch (err) {
       setSubmitError(err.message ?? 'Submission failed.')
     } finally {
@@ -490,7 +347,7 @@ export default function ClientPage() {
       if (error) throw error
 
       setArticles(prev => prev.map(a => a.id === id ? { ...a, status: 'submitted' } : a))
-      sendNotify('submitted', client?.name ?? '', magazine)
+      sendNotify('submitted', client?.name ?? '', magazine, undefined, id)
       setSuccessMsg(`"${magazine}" sent to Or for review.`)
       setTimeout(() => setSuccessMsg(''), 6000)
     } catch (err) {
@@ -744,9 +601,6 @@ export default function ClientPage() {
             onConfirm={confirmAndNotifyOr}
             confirming={confirmingId === article.id}
             deleting={deletingId === article.id}
-            isFetchingPrices={fetchingPricesId === article.id}
-            pricesDone={priceDoneIds.has(article.id)}
-            priceErrors={priceErrorsMap[article.id]}
             isEditing={editingDeniseId === article.id}
             editData={editingDeniseData}
             onEditChange={handleDeniseEditChange}
@@ -758,8 +612,11 @@ export default function ClientPage() {
         )
 
         const renderOrCard = article => {
-          const isEditing  = editingId === article.id
-          const canActOnIt = article.status === 'submitted'
+          const isEditing     = editingId === article.id
+          const canActOnIt    = article.status === 'submitted'
+          const pricesLoading = article.status === 'submitted'
+            && article.price_presswhizz == null
+            && article.price_linksme    == null
           return (
             <div key={article.id} className={`article-card ${isEditing ? 'editing' : ''}`}>
               <div className="card-header">
@@ -809,20 +666,29 @@ export default function ClientPage() {
                   </div>
                 </div>
                 <div className="card-field-row prices">
-                  <div className="card-field">
-                    <span className="cf-label">PressWhizz price</span>
-                    {isEditing
-                      ? <input name="price_presswhizz" type="number" value={editData.price_presswhizz} onChange={handleEditChange} className="edit-input" placeholder="₪" />
-                      : <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
-                    }
-                  </div>
-                  <div className="card-field">
-                    <span className="cf-label">Links.me price</span>
-                    {isEditing
-                      ? <input name="price_linksme" type="number" value={editData.price_linksme} onChange={handleEditChange} className="edit-input" placeholder="₪" />
-                      : <span className="price-val">{fmtPrice(article.price_linksme)}</span>
-                    }
-                  </div>
+                  {pricesLoading && !isEditing ? (
+                    <div className="price-fetching" style={{ gridColumn: '1 / -1' }}>
+                      <span className="price-spinner" />
+                      Fetching prices…
+                    </div>
+                  ) : (
+                    <>
+                      <div className="card-field">
+                        <span className="cf-label">PressWhizz price</span>
+                        {isEditing
+                          ? <input name="price_presswhizz" type="number" value={editData.price_presswhizz} onChange={handleEditChange} className="edit-input" placeholder="₪" />
+                          : <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
+                        }
+                      </div>
+                      <div className="card-field">
+                        <span className="cf-label">Links.me price</span>
+                        {isEditing
+                          ? <input name="price_linksme" type="number" value={editData.price_linksme} onChange={handleEditChange} className="edit-input" placeholder="₪" />
+                          : <span className="price-val">{fmtPrice(article.price_linksme)}</span>
+                        }
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className="card-field">
                   <span className="cf-label">Notes for Publisher</span>

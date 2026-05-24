@@ -1,6 +1,6 @@
 import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -136,11 +136,27 @@ async def push_subscribe(req: PushSubscribeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> None:
+    """Fetch prices in the background (after submission) and save them to the article row."""
+    try:
+        print(f"[bg_prices] fetching for article {article_id} ({magazine!r}, {client_name!r})")
+        result = await run_in_threadpool(fetch_prices, magazine, client_name)
+        sb = _sb()
+        sb.from_("articles").update({
+            "price_presswhizz": result.get("presswhizz"),
+            "price_linksme":    result.get("linksme"),
+        }).eq("id", article_id).execute()
+        print(f"[bg_prices] saved — pw={result.get('presswhizz')} lm={result.get('linksme')}")
+    except Exception as e:
+        print(f"[bg_prices] ERROR for article {article_id}: {e}")
+
+
 class NotifyRequest(BaseModel):
-    event:       str        # 'submitted' | 'approved' | 'sent' | 'returned'
+    event:       str        # 'submitted' | 'approved' | 'sent' | 'returned' | 'published' | 'not_published'
     client_name: str
     magazine:    str
     reason:      str | None = None  # optional — included in email body for 'returned'
+    article_id:  str | None = None  # for 'submitted' — triggers background price fetch
 
 
 _NOTIFY_MAP: dict[str, tuple[list[str], str]] = {
@@ -253,7 +269,7 @@ async def manual_status_check():
 
 
 @app.post("/api/notify")
-async def notify(req: NotifyRequest):
+async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
     """Send a push notification to the appropriate roles for a status-change event."""
     entry = _NOTIFY_MAP.get(req.event)
     if not entry:
@@ -270,6 +286,15 @@ async def notify(req: NotifyRequest):
         sb = _sb()
         await run_in_threadpool(send_push_to_roles, sb, roles, title, body)
         await run_in_threadpool(send_email_to_roles, roles, body, email_body)
+        # When an article is submitted, kick off price fetching in the background
+        # so Or sees prices already populated when he opens the article.
+        if req.event == "submitted" and req.article_id and req.magazine:
+            background_tasks.add_task(
+                _bg_fetch_prices,
+                req.article_id,
+                extract_domain(req.magazine).lower(),
+                req.client_name.strip(),
+            )
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
