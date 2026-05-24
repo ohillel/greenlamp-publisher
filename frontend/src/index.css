@@ -1020,6 +1020,35 @@ body {
   .clients-split { flex-direction: column; }
 }
 
+/* ── Or manual override buttons ── */
+.btn-override-published {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid #16a34a;
+  background: #f0fdf4;
+  color: #15803d;
+  transition: background .15s, border-color .15s;
+}
+.btn-override-published:hover:not(:disabled) { background: #dcfce7; border-color: #15803d; }
+.btn-override-published:disabled { opacity: .6; cursor: not-allowed; }
+
+.btn-override-rejected {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid #dc2626;
+  background: #fef2f2;
+  color: #dc2626;
+  transition: background .15s, border-color .15s;
+}
+.btn-override-rejected:hover:not(:disabled) { background: #fee2e2; border-color: #b91c1c; }
+.btn-override-rejected:disabled { opacity: .6; cursor: not-allowed; }
+
 /* ── Return-to-Or button ── */
 .btn-return {
   width: 100%;

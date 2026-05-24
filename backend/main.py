@@ -145,10 +145,12 @@ class NotifyRequest(BaseModel):
 
 _NOTIFY_MAP: dict[str, tuple[list[str], str]] = {
     # event → (recipient_roles, body_template)
-    "submitted": (["or"],           "New article for {client} → {magazine}"),
-    "approved":  (["publisher"],    "Ready to send for {client} → {magazine}"),
-    "sent":      (["or", "denise"], "Article sent for {client} → {magazine}"),
-    "returned":  (["or"],           "Article returned for {client} → {magazine}"),
+    "submitted":     (["or"],              "New article for {client} → {magazine}"),
+    "approved":      (["publisher"],       "Ready to send for {client} → {magazine}"),
+    "sent":          (["or", "denise"],    "Article sent for {client} → {magazine}"),
+    "returned":      (["or"],              "Article returned for {client} → {magazine}"),
+    "published":     (["or", "denise"],    "✅ Published for {client} → {magazine}"),
+    "not_published": (["or", "denise"],    "❌ Rejected for {client} → {magazine}"),
 }
 
 

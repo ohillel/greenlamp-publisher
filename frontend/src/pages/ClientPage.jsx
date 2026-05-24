@@ -242,6 +242,9 @@ export default function ClientPage() {
   const [markingId,   setMarkingId]   = useState(null)
   const [returningId, setReturningId] = useState(null)
 
+  // Or — manual status override
+  const [overridingId, setOverridingId] = useState(null)
+
   // ── Initial data fetch ───────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -585,6 +588,19 @@ export default function ClientPage() {
     setReturningId(null)
   }
 
+  // ── Or: manual status override for sent_to_publisher ───────────────────────
+
+  const manualOverride = async (id, newStatus) => {
+    setOverridingId(id)
+    const article = articles.find(a => a.id === id)
+    const { error } = await supabase.from('articles').update({ status: newStatus }).eq('id', id)
+    if (!error) {
+      setArticles(prev => prev.map(a => a.id === id ? { ...a, status: newStatus } : a))
+      sendNotify(newStatus, client?.name ?? '', article?.magazine ?? '')
+    }
+    setOverridingId(null)
+  }
+
   // ── Publisher: mark sent ─────────────────────────────────────────────────────
 
   const markSent = async id => {
@@ -872,6 +888,24 @@ export default function ClientPage() {
                           disabled={approving === article.id}
                         >
                           Approve
+                        </button>
+                      </>
+                    )}
+                    {article.status === 'sent_to_publisher' && (
+                      <>
+                        <button
+                          className="btn-override-published"
+                          onClick={() => manualOverride(article.id, 'published')}
+                          disabled={overridingId === article.id}
+                        >
+                          {overridingId === article.id ? '…' : '✓ Published'}
+                        </button>
+                        <button
+                          className="btn-override-rejected"
+                          onClick={() => manualOverride(article.id, 'not_published')}
+                          disabled={overridingId === article.id}
+                        >
+                          {overridingId === article.id ? '…' : '✗ Not Published'}
                         </button>
                       </>
                     )}
