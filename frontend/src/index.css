@@ -493,6 +493,17 @@ body {
   gap: 8px;
 }
 
+.add-client-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.add-client-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .add-client-input {
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -605,11 +616,59 @@ body {
 /* ── Client page header (title + action button) ── */
 .client-page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 20px;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.client-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.client-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-pencil {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--text-muted);
+  padding: 2px 5px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color .15s, background .15s;
+  flex-shrink: 0;
+}
+.btn-pencil:hover { color: var(--text); background: var(--border); }
+
+.client-doc-link {
+  font-size: 13px;
+  color: var(--green);
+  text-decoration: none;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.client-doc-link:hover { text-decoration: underline; }
+
+.client-doc-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.client-doc-edit-row .edit-input {
+  width: 320px;
+  max-width: 100%;
 }
 
 .article-count {

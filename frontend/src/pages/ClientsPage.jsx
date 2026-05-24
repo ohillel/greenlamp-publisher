@@ -100,6 +100,7 @@ export default function ClientsPage() {
   const [search,           setSearch]           = useState('')
   const [adding,           setAdding]           = useState(false)
   const [newName,          setNewName]          = useState('')
+  const [newDocUrl,        setNewDocUrl]        = useState('')
   const [saving,           setSaving]           = useState(false)
   const [deletingId,       setDeletingId]       = useState(null)
   const [pendingClientIds, setPendingClientIds] = useState(new Set())
@@ -196,17 +197,19 @@ export default function ClientsPage() {
     const name = newName.trim()
     if (!name) return
     setSaving(true)
+    const row = { name, ...(newDocUrl.trim() ? { google_doc_url: newDocUrl.trim() } : {}) }
     const { data, error } = await supabase
-      .from('clients').insert({ name }).select().single()
+      .from('clients').insert(row).select().single()
     if (!error) {
       setClients(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
       setNewName('')
+      setNewDocUrl('')
       setAdding(false)
     }
     setSaving(false)
   }
 
-  const cancelAdd = () => { setAdding(false); setNewName('') }
+  const cancelAdd = () => { setAdding(false); setNewName(''); setNewDocUrl('') }
 
   const deleteClient = async (e, id, name) => {
     e.stopPropagation()
@@ -290,7 +293,7 @@ export default function ClientsPage() {
       {/* ── Toolbar ── */}
       <div className="clients-toolbar">
         {adding ? (
-          <div className="add-client-row">
+          <div className="add-client-form">
             <input
               ref={inputRef}
               className="add-client-input"
@@ -301,10 +304,20 @@ export default function ClientsPage() {
               placeholder="Client name"
               maxLength={100}
             />
-            <button className="btn-save" onClick={addClient} disabled={saving || !newName.trim()}>
-              {saving ? 'Saving…' : 'Add'}
-            </button>
-            <button className="btn-ghost" onClick={cancelAdd}>Cancel</button>
+            <input
+              className="add-client-input"
+              type="url"
+              value={newDocUrl}
+              onChange={e => setNewDocUrl(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') addClient(); if (e.key === 'Escape') cancelAdd() }}
+              placeholder="Google Doc URL (optional)"
+            />
+            <div className="add-client-actions">
+              <button className="btn-save" onClick={addClient} disabled={saving || !newName.trim()}>
+                {saving ? 'Saving…' : 'Add'}
+              </button>
+              <button className="btn-ghost" onClick={cancelAdd}>Cancel</button>
+            </div>
           </div>
         ) : (
           <button className="btn-add-client" onClick={() => setAdding(true)}>

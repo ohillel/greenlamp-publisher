@@ -13,6 +13,7 @@ load_dotenv()
 
 from scraper.prices import fetch_prices                      # noqa: E402
 from scraper.status_checker import run_status_check          # noqa: E402
+from scraper.gmail_checker import check_gmail_notifications  # noqa: E402
 from scraper.push_notifications import send_push_to_roles    # noqa: E402
 from scraper.email_notifications import send_email_to_roles  # noqa: E402
 
@@ -35,8 +36,16 @@ async def lifespan(app: FastAPI):
         max_instances=1,       # never overlap — wait for previous run to finish
         coalesce=True,         # skip missed fires if the server was paused
     )
+    scheduler.add_job(
+        check_gmail_notifications,
+        trigger='interval',
+        minutes=CHECK_INTERVAL_MINUTES,
+        id='gmail_check',
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
-    print(f"[scheduler] started — publication status check every {CHECK_INTERVAL_MINUTES} minutes")
+    print(f"[scheduler] started — status check + Gmail check every {CHECK_INTERVAL_MINUTES} minutes")
     yield
     scheduler.shutdown(wait=False)
     print("[scheduler] stopped")
@@ -285,7 +294,40 @@ async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
     try:
         sb = _sb()
         await run_in_threadpool(send_push_to_roles, sb, roles, title, body)
-        await run_in_threadpool(send_email_to_roles, roles, body, email_body)
+
+        # For 'published' events, look up the published URL and client Google Doc
+        # and include them as extra links in the email.
+        extra_links: list[dict] = []
+        if req.event == "published" and req.article_id:
+            try:
+                art_res = sb.from_("articles") \
+                    .select("published_url, client_id") \
+                    .eq("id", req.article_id) \
+                    .single() \
+                    .execute()
+                if art_res.data:
+                    if art_res.data.get("published_url"):
+                        extra_links.append({
+                            "url":   art_res.data["published_url"],
+                            "label": "View Published Article",
+                        })
+                    if art_res.data.get("client_id"):
+                        cli_res = sb.from_("clients") \
+                            .select("google_doc_url") \
+                            .eq("id", art_res.data["client_id"]) \
+                            .single() \
+                            .execute()
+                        if cli_res.data and cli_res.data.get("google_doc_url"):
+                            extra_links.append({
+                                "url":   cli_res.data["google_doc_url"],
+                                "label": "Client Google Doc",
+                            })
+            except Exception as link_err:
+                print(f"[notify] could not fetch extra links for published event: {link_err}")
+
+        await run_in_threadpool(send_email_to_roles, roles, body, email_body,
+                                extra_links or None)
+
         # When an article is submitted, kick off price fetching in the background
         # so Or sees prices already populated when he opens the article.
         if req.event == "submitted" and req.article_id and req.magazine:

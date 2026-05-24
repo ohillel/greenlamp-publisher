@@ -75,3 +75,6 @@ ALTER TABLE articles ADD COLUMN IF NOT EXISTS return_reason   TEXT;
 
 -- ── Migration: add published_url column ──────────────────────────────────────
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS published_url TEXT;
+
+-- ── Migration: add google_doc_url to clients ─────────────────────────────────
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS google_doc_url TEXT;

@@ -175,6 +175,11 @@ export default function ClientPage() {
   const [markingId,   setMarkingId]   = useState(null)
   const [returningId, setReturningId] = useState(null)
 
+  // Client Google Doc URL inline edit
+  const [editingClientDoc, setEditingClientDoc] = useState(false)
+  const [clientDocDraft,   setClientDocDraft]   = useState('')
+  const [savingClientDoc,  setSavingClientDoc]  = useState(false)
+
   // Or — manual status override
   const [overridingId,   setOverridingId]   = useState(null)
   const [publishUrlId,   setPublishUrlId]   = useState(null)  // article showing URL input
@@ -187,7 +192,7 @@ export default function ClientPage() {
     if (!role) return
     const fetchAll = async () => {
       const [{ data: clientData }, { data: articlesData }] = await Promise.all([
-        supabase.from('clients').select('id, name').eq('id', clientId).single(),
+        supabase.from('clients').select('id, name, google_doc_url').eq('id', clientId).single(),
         // All roles see ALL articles — actions are gated per status, not filtered.
         supabase.from('articles').select('*').eq('client_id', clientId)
           .order('created_at', { ascending: false }),
@@ -485,7 +490,7 @@ export default function ClientPage() {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, ...update } : a))
       setPublishUrlId(null)
       setPublishUrl('')
-      sendNotify('published', client?.name ?? '', article?.magazine ?? '')
+      sendNotify('published', client?.name ?? '', article?.magazine ?? '', undefined, id)
     } else {
       // Keep input open so Or can see the error and retry
       setPublishUrlError(error.message || 'DB update failed — check console')
@@ -531,6 +536,26 @@ export default function ClientPage() {
     setMarkingId(null)
   }
 
+  // ── Client Google Doc URL edit ───────────────────────────────────────────────
+
+  const startClientDocEdit = () => {
+    setClientDocDraft(client?.google_doc_url ?? '')
+    setEditingClientDoc(true)
+  }
+
+  const cancelClientDocEdit = () => setEditingClientDoc(false)
+
+  const saveClientDoc = async () => {
+    setSavingClientDoc(true)
+    const url = clientDocDraft.trim() || null
+    const { error } = await supabase.from('clients').update({ google_doc_url: url }).eq('id', clientId)
+    if (!error) {
+      setClient(prev => ({ ...prev, google_doc_url: url }))
+      setEditingClientDoc(false)
+    }
+    setSavingClientDoc(false)
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
 
   if (loading) return <Layout><div className="loading-inline">Loading…</div></Layout>
@@ -558,16 +583,52 @@ export default function ClientPage() {
       </div>
 
       <div className="client-page-header">
-        <h1 className="page-title" style={{ margin: 0 }}>
-          {client?.name}
-          {articles.length > 0 && (
-            <span className="article-count">
-              {statusFilter === 'all'
-                ? `${articles.length} total`
-                : `${visibleArticles.length} of ${articles.length}`}
-            </span>
-          )}
-        </h1>
+        <div className="client-header-left">
+          <div className="client-name-row">
+            <h1 className="page-title" style={{ margin: 0 }}>
+              {client?.name}
+              {articles.length > 0 && (
+                <span className="article-count">
+                  {statusFilter === 'all'
+                    ? `${articles.length} total`
+                    : `${visibleArticles.length} of ${articles.length}`}
+                </span>
+              )}
+            </h1>
+            <button
+              className="btn-pencil"
+              onClick={editingClientDoc ? cancelClientDocEdit : startClientDocEdit}
+              title={editingClientDoc ? 'Cancel edit' : 'Edit client Google Doc URL'}
+            >
+              {editingClientDoc ? '✕' : '✎'}
+            </button>
+          </div>
+
+          {editingClientDoc ? (
+            <div className="client-doc-edit-row">
+              <input
+                type="url"
+                className="edit-input"
+                value={clientDocDraft}
+                onChange={e => setClientDocDraft(e.target.value)}
+                placeholder="https://docs.google.com/…"
+                autoFocus
+                onKeyDown={e => {
+                  if (e.key === 'Enter')  saveClientDoc()
+                  if (e.key === 'Escape') cancelClientDocEdit()
+                }}
+              />
+              <button className="btn-save" onClick={saveClientDoc} disabled={savingClientDoc}>
+                {savingClientDoc ? 'Saving…' : 'Save'}
+              </button>
+              <button className="btn-ghost" onClick={cancelClientDocEdit}>Cancel</button>
+            </div>
+          ) : client?.google_doc_url ? (
+            <a href={client.google_doc_url} target="_blank" rel="noreferrer" className="client-doc-link">
+              📄 Client Doc ↗
+            </a>
+          ) : null}
+        </div>
 
         {role === 'denise' && (
           <button

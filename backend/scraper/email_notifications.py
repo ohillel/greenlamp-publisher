@@ -32,10 +32,18 @@ def _gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def send_email_to_roles(roles: list[str], subject: str, body_text: str) -> None:
+def send_email_to_roles(
+    roles: list[str],
+    subject: str,
+    body_text: str,
+    extra_links: list[dict] | None = None,
+) -> None:
     """
     Send an email to every address mapped from `roles` using the Gmail API.
     Silently skips if GOOGLE_TOKEN_JSON is not configured.
+
+    extra_links: optional list of {"url": str, "label": str} rendered as
+                 additional link buttons in the HTML email and plain-text URLs.
     """
     if not os.environ.get("GOOGLE_TOKEN_JSON"):
         print("[email] GOOGLE_TOKEN_JSON not set — skipping")
@@ -46,6 +54,22 @@ def send_email_to_roles(roles: list[str], subject: str, body_text: str) -> None:
         print(f"[email] no addresses mapped for roles {roles!r} — skipping")
         return
 
+    # Build extra link buttons for HTML
+    extra_html = ""
+    extra_plain = ""
+    if extra_links:
+        for link in extra_links:
+            url   = link.get("url",   "")
+            label = link.get("label", url)
+            if url:
+                extra_html  += (
+                    f'<a href="{url}" style="display:inline-block;margin-top:10px;'
+                    f'background:#1d4ed8;color:#fff;text-decoration:none;'
+                    f'padding:10px 20px;border-radius:6px;font-size:14px;font-weight:500">'
+                    f'{label} →</a><br>\n'
+                )
+                extra_plain += f"\n{label}: {url}"
+
     html = f"""\
 <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a1a1a">
   <p style="font-size:16px;margin:0 0 20px">{body_text}</p>
@@ -53,9 +77,11 @@ def send_email_to_roles(roles: list[str], subject: str, body_text: str) -> None:
      style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;
             padding:10px 20px;border-radius:6px;font-size:14px;font-weight:500">
     Open Greenlamp Publisher →
-  </a>
+  </a><br>
+  {extra_html}
 </div>
 """
+    plain_text = body_text + extra_plain
 
     try:
         service = _gmail_service()
@@ -64,8 +90,8 @@ def send_email_to_roles(roles: list[str], subject: str, body_text: str) -> None:
             msg["From"]    = SENDER
             msg["To"]      = to_addr
             msg["Subject"] = subject
-            msg.attach(MIMEText(body_text, "plain", "utf-8"))
-            msg.attach(MIMEText(html,      "html",  "utf-8"))
+            msg.attach(MIMEText(plain_text, "plain", "utf-8"))
+            msg.attach(MIMEText(html,       "html",  "utf-8"))
 
             raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
             service.users().messages().send(
