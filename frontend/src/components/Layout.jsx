@@ -92,7 +92,7 @@ export default function Layout({ title, children }) {
           <span className="logo-dot" /> Greenlamp Publisher
         </span>
         <div className="topbar-right">
-          <UserSwitcher role={role} />
+          <UserSwitcher key={role} role={role} />
           {role === 'or' && (
             <Link to="/users" className="topbar-nav-link">Users</Link>
           )}
