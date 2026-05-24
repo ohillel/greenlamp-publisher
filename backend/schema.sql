@@ -72,3 +72,6 @@ CREATE INDEX IF NOT EXISTS profiles_role_idx             ON profiles(role);
 -- Run these once against the live Supabase DB (safe to run multiple times):
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS publisher_notes TEXT;
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS return_reason   TEXT;
+
+-- ── Migration: add published_url column ──────────────────────────────────────
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS published_url TEXT;

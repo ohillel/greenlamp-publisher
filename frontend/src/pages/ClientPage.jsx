@@ -176,9 +176,10 @@ export default function ClientPage() {
   const [returningId, setReturningId] = useState(null)
 
   // Or — manual status override
-  const [overridingId, setOverridingId] = useState(null)
-  const [publishUrlId, setPublishUrlId] = useState(null)  // article showing URL input
-  const [publishUrl,   setPublishUrl]   = useState('')
+  const [overridingId,   setOverridingId]   = useState(null)
+  const [publishUrlId,   setPublishUrlId]   = useState(null)  // article showing URL input
+  const [publishUrl,     setPublishUrl]     = useState('')
+  const [publishUrlError, setPublishUrlError] = useState('')
 
   // ── Initial data fetch ───────────────────────────────────────────────────────
 
@@ -468,18 +469,28 @@ export default function ClientPage() {
 
   const confirmPublished = async (id, url) => {
     setOverridingId(id)
+    setPublishUrlError('')
     const article = articles.find(a => a.id === id)
     const update = { status: 'published', published_url: url || null }
-    const { error } = await supabase.from('articles').update(update).eq('id', id)
+
+    console.log('[confirmPublished] updating article', id, 'with', update)
+    const { data, error } = await supabase
+      .from('articles')
+      .update(update)
+      .eq('id', id)
+      .select()
+    console.log('[confirmPublished] result — data:', data, '| error:', error)
+
     if (!error) {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, ...update } : a))
+      setPublishUrlId(null)
+      setPublishUrl('')
       sendNotify('published', client?.name ?? '', article?.magazine ?? '')
     } else {
-      console.error('[confirmPublished] DB error:', error)
+      // Keep input open so Or can see the error and retry
+      setPublishUrlError(error.message || 'DB update failed — check console')
     }
     setOverridingId(null)
-    setPublishUrlId(null)
-    setPublishUrl('')
   }
 
   const markNotPublished = async id => {
@@ -806,10 +817,13 @@ export default function ClientPage() {
                       className="edit-input"
                       placeholder="https://… (published article URL)"
                       value={publishUrl}
-                      onChange={e => setPublishUrl(e.target.value)}
+                      onChange={e => { setPublishUrl(e.target.value); setPublishUrlError('') }}
                       autoFocus
                       onKeyDown={e => { if (e.key === 'Enter') confirmPublished(article.id, publishUrl) }}
                     />
+                    {publishUrlError && (
+                      <p className="form-error" style={{ marginTop: 4, fontSize: 12 }}>{publishUrlError}</p>
+                    )}
                     <div className="approve-notes-actions">
                       <button
                         className="btn-override-published"
@@ -819,7 +833,7 @@ export default function ClientPage() {
                       >
                         {overridingId === article.id ? 'Saving…' : 'Confirm Published'}
                       </button>
-                      <button className="btn-ghost" onClick={() => { setPublishUrlId(null); setPublishUrl('') }}>Cancel</button>
+                      <button className="btn-ghost" onClick={() => { setPublishUrlId(null); setPublishUrl(''); setPublishUrlError('') }}>Cancel</button>
                     </div>
                   </div>
                 ) : (
