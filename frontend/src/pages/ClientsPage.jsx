@@ -320,9 +320,20 @@ export default function ClientsPage() {
             </div>
           </div>
         ) : (
-          <button className="btn-add-client" onClick={() => setAdding(true)}>
-            + New Client
-          </button>
+          <>
+            <button className="btn-add-client" onClick={() => setAdding(true)}>
+              + New Client
+            </button>
+            <div className="clients-search-wrap">
+              <input
+                className="clients-search"
+                type="search"
+                placeholder="Search clients…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+          </>
         )}
       </div>
 

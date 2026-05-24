@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 export default function Login() {
@@ -8,6 +8,7 @@ export default function Login() {
   const [error,    setError]    = useState('')
   const [loading,  setLoading]  = useState(false)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -31,8 +32,9 @@ export default function Login() {
       if (authErr) throw authErr
 
       // AuthContext picks up the SIGNED_IN event and fetches the role.
-      // All roles share the same entry point.
-      navigate('/clients', { replace: true })
+      // Redirect back to the originally-requested URL (from deep links) or /clients.
+      const next = searchParams.get('next')
+      navigate(next ? decodeURIComponent(next) : '/clients', { replace: true })
     } catch (err) {
       setError(err.message ?? 'Login failed. Please try again.')
     } finally {

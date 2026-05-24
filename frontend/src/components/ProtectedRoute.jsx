@@ -1,9 +1,10 @@
 import { useRef } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 export default function ProtectedRoute({ children }) {
   const { loading, role } = useAuth()
+  const location = useLocation()
 
   // Once we have confirmed the user is authenticated (role is set), remember
   // that fact so transient auth events can't unmount the page and lose form state.
@@ -15,10 +16,12 @@ export default function ProtectedRoute({ children }) {
     return <div className="loading">Loading…</div>
   }
 
-  // Not authenticated — redirect to login.
-  // After wasAuthenticated is true, this only triggers on an actual sign-out
-  // (role goes null because AuthContext explicitly cleared it).
-  if (!role) return <Navigate to="/login" replace />
+  // Not authenticated — redirect to login, preserving the intended URL so
+  // Login can redirect back to it after a successful sign-in.
+  if (!role) {
+    const next = encodeURIComponent(location.pathname + location.search)
+    return <Navigate to={`/login?next=${next}`} replace />
+  }
 
   return children
 }
