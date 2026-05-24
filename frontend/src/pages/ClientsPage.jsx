@@ -136,8 +136,6 @@ export default function ClientsPage() {
     ? clients.filter(c => c.name.toLowerCase().includes(q))
     : clients
 
-  const upToDateClients = visibleClients.filter(c => !pendingClientIds.has(c.id))
-
   const renderClientFolder = client => (
     <div
       key={client.id}
@@ -287,18 +285,39 @@ export default function ClientsPage() {
             )}
           </div>
 
-          {/* Right: up-to-date folders */}
+          {/* Right: all client folders (pending ones highlighted) */}
           <div className="or-uptodate-col">
-            <div className="clients-col-title">Up to date</div>
-            {upToDateClients.length === 0 ? (
-              <div className="empty-state" style={{ padding: '24px 0' }}>
-                <p>No clients yet.</p>
-              </div>
-            ) : (
-              <div className="clients-grid">
-                {upToDateClients.map(renderClientFolder)}
-              </div>
-            )}
+            <div className="clients-col-title">All clients</div>
+            <div className="clients-grid">
+              {visibleClients.map(client => {
+                const isPending = pendingClientIds.has(client.id)
+                return (
+                  <div
+                    key={client.id}
+                    className={`client-card${isPending ? ' client-card--pending' : ''}${deletingId === client.id ? ' deleting' : ''}`}
+                    onClick={() => navigate(`/clients/${client.id}`)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => e.key === 'Enter' && navigate(`/clients/${client.id}`)}
+                  >
+                    <div className="folder-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+                      </svg>
+                    </div>
+                    <span className="client-name">{client.name}</span>
+                    <button
+                      className="client-delete-btn"
+                      onClick={e => deleteClient(e, client.id, client.name)}
+                      disabled={deletingId === client.id}
+                      title="Delete client"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
       )}
