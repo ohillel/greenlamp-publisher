@@ -285,53 +285,37 @@ class SwitchUserRequest(BaseModel):
 @app.post("/api/admin/switch-user")
 async def switch_user(req: SwitchUserRequest):
     """
-    Create a live session for the target user via the Supabase admin API and
-    return the access + refresh tokens directly.  The frontend calls
-    supabase.auth.setSession() with these tokens — no redirect, no login screen.
+    Instantly create a session for a target user without a login screen:
+      1. admin.generate_link(magiclink) → hashed_token  (no email sent)
+      2. auth.verify_otp(token_hash)    → real session   (server-side redemption)
+    Returns access_token + refresh_token; frontend calls setSession() directly.
     Only allows switching to the hard-coded allow-list above.
     """
-    import httpx
-
     if req.target_email not in _SWITCH_TARGETS:
         raise HTTPException(status_code=403, detail="Not an allowed switch target.")
     try:
         sb = _sb()
 
-        # 1. Resolve email → user ID from the profiles table (RLS bypassed by service role)
-        profile = (
-            sb.from_("profiles")
-            .select("id")
-            .eq("email", req.target_email)
-            .single()
-            .execute()
+        # Step 1: generate the OTP — admin API, no email is dispatched
+        link_resp = await run_in_threadpool(
+            sb.auth.admin.generate_link,
+            {"type": "magiclink", "email": req.target_email},
         )
-        user_id = (profile.data or {}).get("id")
-        if not user_id:
-            raise HTTPException(status_code=404, detail=f"No profile found for {req.target_email!r}")
+        hashed_token = link_resp.properties.hashed_token
 
-        # 2. Create a session for that user via the Supabase auth admin REST endpoint
-        supabase_url = os.environ["SUPABASE_URL"].rstrip("/")
-        service_key  = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+        # Step 2: redeem the token server-side to get a real session
+        session_resp = await run_in_threadpool(
+            sb.auth.verify_otp,
+            {"token_hash": hashed_token, "type": "magiclink"},
+        )
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{supabase_url}/auth/v1/admin/users/{user_id}/session",
-                headers={
-                    "Authorization": f"Bearer {service_key}",
-                    "apikey":        service_key,
-                },
-            )
+        session = session_resp.session
+        if not session:
+            raise ValueError(f"verify_otp returned no session (response: {session_resp!r})")
 
-        if resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Supabase session creation failed ({resp.status_code}): {resp.text}",
-            )
-
-        data = resp.json()
         return {
-            "access_token":  data["access_token"],
-            "refresh_token": data["refresh_token"],
+            "access_token":  session.access_token,
+            "refresh_token": session.refresh_token,
         }
     except HTTPException:
         raise
