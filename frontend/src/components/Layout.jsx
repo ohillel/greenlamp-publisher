@@ -3,8 +3,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth, useAuthProfile } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
 const ACCOUNTS = {
-  or:        { email: 'seojobisrael@gmail.com', password: 'Greenlamp1!', initial: 'O', label: 'Switch to Or',    color: '#16a34a' },
+  // Or uses Gmail OAuth — no password; session is created server-side via admin API
+  or:        { email: 'seojobisrael@gmail.com', useAdminSwitch: true,  initial: 'O', label: 'Switch to Or',     color: '#16a34a' },
   denise:    { email: 'denise@greenlamp.co',    password: 'Greenlamp1!', initial: 'D', label: 'Switch to Denise', color: '#7c3aed' },
   publisher: { email: 'office@greenlamp.co',    password: 'Greenlamp1!', initial: 'E', label: 'Switch to Eden',   color: '#0369a1' },
 }
@@ -27,11 +30,24 @@ function UserSwitcher({ role }) {
     if (switchingTo) return
     setSwitchingTo(target.email)
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email:    target.email,
-        password: target.password,
-      })
-      if (error) throw error
+      if (target.useAdminSwitch) {
+        // Or's account uses Gmail OAuth — create session via backend admin API
+        const res = await fetch(`${API_BASE}/api/admin/switch-user`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ target_email: target.email }),
+        })
+        if (!res.ok) throw new Error(`switch-user failed: ${res.status}`)
+        const { access_token, refresh_token } = await res.json()
+        const { error } = await supabase.auth.setSession({ access_token, refresh_token })
+        if (error) throw error
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email:    target.email,
+          password: target.password,
+        })
+        if (error) throw error
+      }
       navigate('/clients')
     } catch (err) {
       console.error('[switch-user]', err)
