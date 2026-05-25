@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-const PUB_LABEL = { presswhizz: 'PressWhizz', linksme: 'Links.me' }
+const PUB_LABEL = { presswhizz: 'PressWhizz', linksme: 'Links.me', other: 'Other' }
 
 const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 
@@ -105,10 +105,12 @@ export default function ClientsPage() {
   const [deletingId,       setDeletingId]       = useState(null)
   const [pendingClientIds, setPendingClientIds] = useState(new Set())
 
-  // Or — submitted articles table
+  // Or — submitted articles + approved "other" assigned to Or
   const [pendingArticles,   setPendingArticles]   = useState([])
   // Publisher — approved articles table
   const [publisherArticles, setPublisherArticles] = useState([])
+  // Denise — approved "other" articles assigned to her
+  const [deniseArticles,    setDeniseArticles]    = useState([])
 
   const [popup, setPopup] = useState(null)   // { article, x, y, role }
 
@@ -127,21 +129,41 @@ export default function ClientsPage() {
     if (adding) inputRef.current?.focus()
   }, [adding])
 
-  // ── Or: fetch submitted articles ─────────────────────────────────────────────
+  // ── Or: fetch submitted articles + approved "other" assigned to Or ───────────
 
   const refreshOrArticles = useCallback(async () => {
     if (role !== 'or') return
-    const { data } = await supabase
-      .from('articles')
-      .select('id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, price_presswhizz, price_linksme, clients(name)')
-      .eq('status', 'submitted')
-      .order('created_at', { ascending: true })
-    const articles = data ?? []
+    const cols = 'id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, assigned_to, price_presswhizz, price_linksme, clients(name)'
+    const [submittedRes, approvedOrRes] = await Promise.all([
+      supabase.from('articles').select(cols).eq('status', 'submitted').order('created_at', { ascending: true }),
+      supabase.from('articles').select(cols).eq('status', 'approved').eq('assigned_to', 'or').order('created_at', { ascending: true }),
+    ])
+    const articles = [
+      ...(submittedRes.data ?? []),
+      ...(approvedOrRes.data ?? []),
+    ].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
     setPendingArticles(articles)
     setPendingClientIds(new Set(articles.map(a => a.client_id)))
   }, [role])
 
   useEffect(() => { refreshOrArticles() }, [refreshOrArticles])
+
+  // ── Denise: fetch approved "other" articles assigned to her ─────────────────
+
+  const refreshDeniseArticles = useCallback(async () => {
+    if (role !== 'denise') return
+    const { data } = await supabase
+      .from('articles')
+      .select('id, client_id, status, created_at, magazine, google_doc_url, clients(name)')
+      .eq('status', 'approved')
+      .eq('assigned_to', 'denise')
+      .order('created_at', { ascending: true })
+    const articles = data ?? []
+    setDeniseArticles(articles)
+    setPendingClientIds(new Set(articles.map(a => a.client_id)))
+  }, [role])
+
+  useEffect(() => { refreshDeniseArticles() }, [refreshDeniseArticles])
 
   // ── Publisher: fetch approved articles ───────────────────────────────────────
 
@@ -162,16 +184,17 @@ export default function ClientsPage() {
   // ── Realtime: keep tables accurate ───────────────────────────────────────────
 
   useEffect(() => {
-    if (role !== 'or' && role !== 'publisher') return
+    if (role !== 'or' && role !== 'publisher' && role !== 'denise') return
     const channel = supabase
       .channel('articles-pending-indicators')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'articles' }, () => {
-        if (role === 'or') refreshOrArticles()
-        else refreshPublisherArticles()
+        if (role === 'or')        refreshOrArticles()
+        else if (role === 'publisher') refreshPublisherArticles()
+        else if (role === 'denise')    refreshDeniseArticles()
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [role, refreshOrArticles, refreshPublisherArticles])
+  }, [role, refreshOrArticles, refreshPublisherArticles, refreshDeniseArticles])
 
   // ── Close popup on outside click ─────────────────────────────────────────────
 
@@ -237,15 +260,18 @@ export default function ClientsPage() {
 
   // Or table row
   const renderOrRow = (article, i) => {
-    const effPub = article.chosen_publisher || article.preferred_publisher
+    const effPub  = article.chosen_publisher || article.preferred_publisher
+    const isOther = effPub === 'other'
     const pw = article.price_presswhizz
     const lm = article.price_linksme
-    const priceStr = (pw == null && lm == null)
-      ? null
-      : [pw != null && `PressWhizz: ${fmtPrice(pw)}`, lm != null && `Links.me: ${fmtPrice(lm)}`]
-          .filter(Boolean).join(' | ')
+    const priceStr = isOther ? null
+      : (pw == null && lm == null)
+        ? null
+        : [pw != null && `PressWhizz: ${fmtPrice(pw)}`, lm != null && `Links.me: ${fmtPrice(lm)}`]
+            .filter(Boolean).join(' | ')
+    const rowClass = article.status === 'approved' ? 'status-approved' : 'status-submitted'
     return (
-      <tr key={article.id} className="pending-article-row status-submitted" onClick={e => handleRowClick(e, article)}>
+      <tr key={article.id} className={`pending-article-row ${rowClass}`} onClick={e => handleRowClick(e, article)}>
         <td className="col-num">{i + 1}</td>
         <td className="col-client">{article.clients?.name ?? '—'}</td>
         <td className="col-date">{fmtDate(article.created_at)}</td>
@@ -259,13 +285,33 @@ export default function ClientsPage() {
           <span className={effPub ? 'pub-tag' : 'cf-empty'}>{PUB_LABEL[effPub] ?? '—'}</span>
         </td>
         <td className="col-prices">
-          {priceStr == null
-            ? <span className="price-fetching-inline"><span className="price-spinner" /> Fetching…</span>
-            : <span>{priceStr}</span>}
+          {isOther
+            ? <span className="cf-empty">—</span>
+            : priceStr == null
+              ? <span className="price-fetching-inline"><span className="price-spinner" /> Fetching…</span>
+              : <span>{priceStr}</span>}
         </td>
       </tr>
     )
   }
+
+  // Denise table row (approved "other" articles assigned to her)
+  const renderDeniseRow = (article, i) => (
+    <tr key={article.id} className="pending-article-row status-approved" onClick={e => handleRowClick(e, article)}>
+      <td className="col-num">{i + 1}</td>
+      <td className="col-client">{article.clients?.name ?? '—'}</td>
+      <td className="col-magazine">{article.magazine ?? '—'}</td>
+      <td className="col-doc">
+        {article.google_doc_url
+          ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="doc-link">Doc ↗</a>
+          : <span className="cf-empty">—</span>}
+      </td>
+      <td className="col-publisher">
+        <span className="pub-tag">Other</span>
+      </td>
+      <td className="col-date">{fmtDate(article.created_at)}</td>
+    </tr>
+  )
 
   // Publisher table row
   const renderPublisherRow = (article, i) => {
@@ -367,8 +413,28 @@ export default function ClientsPage() {
         />
       )}
 
-      {/* ── Denise and other roles: flat grid ── */}
-      {!loading && role !== 'or' && role !== 'publisher' && (
+      {/* ── Denise: assigned "other" articles table + folders ── */}
+      {!loading && role === 'denise' && deniseArticles.length === 0 && (
+        visibleClients.length === 0 ? (
+          <div className="empty-state">
+            {search ? <p>No clients match "{search}".</p> : <p>No clients yet. Add your first one above.</p>}
+          </div>
+        ) : (
+          <ClientFoldersGrid {...folderProps} />
+        )
+      )}
+      {!loading && role === 'denise' && deniseArticles.length > 0 && (
+        <TaskTableLayout
+          articles={deniseArticles}
+          tableTitle="To send"
+          tableColumns={['#', 'Client', 'Magazine', 'Doc', 'Publisher', 'Submitted']}
+          renderRow={renderDeniseRow}
+          {...folderProps}
+        />
+      )}
+
+      {/* ── Other roles: flat grid ── */}
+      {!loading && role !== 'or' && role !== 'publisher' && role !== 'denise' && (
         visibleClients.length === 0 ? (
           <div className="empty-state">
             {search ? <p>No clients match "{search}".</p> : <p>No clients yet. Add your first one above.</p>}
@@ -385,7 +451,7 @@ export default function ClientsPage() {
           style={{ position: 'fixed', top: popup.y + 4, left: popup.x, zIndex: 1000 }}
           onClick={e => e.stopPropagation()}
         >
-          {role === 'or' && (
+          {role === 'or' && popup.article.status === 'submitted' && (
             <button
               className="row-popup-btn row-popup-approve"
               onClick={() => {

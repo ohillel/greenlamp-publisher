@@ -84,3 +84,7 @@ ALTER TABLE articles ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALS
 
 -- ── Migration: add published_at column ───────────────────────────────────────
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;
+
+-- ── Migration: add assigned_to column (for "Other" publisher flow) ────────────
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS assigned_to TEXT;
+-- values: 'denise' | 'or' | null (presswhizz/linksme articles always null)

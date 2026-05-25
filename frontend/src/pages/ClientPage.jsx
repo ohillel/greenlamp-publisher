@@ -29,8 +29,9 @@ const sendNotify = (event, clientName, magazine, reason, articleId, clientId) =>
 const PUBLISHERS = [
   { value: 'presswhizz', label: 'PressWhizz' },
   { value: 'linksme',    label: 'Links.me'   },
+  { value: 'other',      label: 'Other'      },
 ]
-const PUB_LABEL = { presswhizz: 'PressWhizz', linksme: 'Links.me' }
+const PUB_LABEL = { presswhizz: 'PressWhizz', linksme: 'Links.me', other: 'Other' }
 
 const EMPTY_FORM = { google_doc_url: '', magazine: '', preferred_publisher: '' }
 const EMPTY_EDIT = {
@@ -45,8 +46,11 @@ const EMPTY_DENISE_EDIT = { google_doc_url: '', magazine: '', preferred_publishe
 function DeniseArticleCard({
   article, id, onDelete, onConfirm, confirming, deleting,
   isEditing, editData, onEditChange, onSaveEdit, onStartEdit, onCancelEdit, savingEdit,
+  onMarkSent, markingSent,
 }) {
-  const isDraft    = article.status === 'draft'
+  const isDraft       = article.status === 'draft'
+  const isOtherAssigned = article.preferred_publisher === 'other' && article.assigned_to === 'denise'
+    && article.status === 'approved'
   // Confirm is available once the required fields are filled — no price check needed
   const canConfirm = isDraft && !!article.magazine && !!article.preferred_publisher && !isEditing
 
@@ -77,6 +81,7 @@ function DeniseArticleCard({
                 <option value="">— Select —</option>
                 <option value="presswhizz">PressWhizz</option>
                 <option value="linksme">Links.me</option>
+                <option value="other">Other</option>
               </select>
             </div>
           </>
@@ -94,6 +99,12 @@ function DeniseArticleCard({
                 {PUB_LABEL[article.preferred_publisher] ?? article.preferred_publisher ?? '—'}
               </span>
             </div>
+            {article.publisher_notes && !isDraft && (
+              <div className="card-field">
+                <div className="publisher-notes-label">Notes from Or</div>
+                <div className="publisher-notes">{article.publisher_notes}</div>
+              </div>
+            )}
             {article.published_url && (
               <div className="card-field">
                 <span className="cf-label" style={{ color: '#16a34a' }}>Published URL</span>
@@ -127,7 +138,7 @@ function DeniseArticleCard({
             <button
               className="btn-delete-article"
               onClick={() => onDelete(article.id)}
-              disabled={deleting || confirming}
+              disabled={deleting || confirming || markingSent}
             >
               {deleting ? 'Deleting…' : 'Delete'}
             </button>
@@ -138,6 +149,15 @@ function DeniseArticleCard({
                 disabled={confirming || deleting}
               >
                 {confirming ? 'Notifying…' : 'Confirm & Notify Or'}
+              </button>
+            )}
+            {isOtherAssigned && (
+              <button
+                className="btn-send"
+                onClick={() => onMarkSent(article.id)}
+                disabled={markingSent || deleting}
+              >
+                {markingSent ? 'Updating…' : 'Mark as sent'}
               </button>
             )}
           </>
@@ -458,21 +478,35 @@ export default function ClientPage() {
     setSaving(false)
   }
 
-  // ── Or: approve (with optional notes and preferred→chosen fallback) ──────────
+  // ── Or: approve (with optional notes; assignedTo only used for "other" articles) ──
 
-  const approve = async (id, notes) => {
+  const approve = async (id, notes, assignedTo = null) => {
     setApproving(id)
     const article    = articles.find(a => a.id === id)
+    const isOther    = article?.preferred_publisher === 'other'
     const updateData = { status: 'approved', reminder_sent: false }
-    // Default chosen_publisher to preferred_publisher if Or didn't explicitly set one
-    if (!article?.chosen_publisher && article?.preferred_publisher) {
-      updateData.chosen_publisher = article.preferred_publisher
+
+    if (isOther) {
+      // "Other" articles: record who handles it; don't auto-set chosen_publisher
+      updateData.chosen_publisher = 'other'
+      if (assignedTo) updateData.assigned_to = assignedTo
+    } else {
+      // Regular articles: default chosen_publisher to preferred if Or didn't set one
+      if (!article?.chosen_publisher && article?.preferred_publisher) {
+        updateData.chosen_publisher = article.preferred_publisher
+      }
     }
+
     if (notes) updateData.publisher_notes = notes
     const { error } = await supabase.from('articles').update(updateData).eq('id', id)
     if (!error) {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, ...updateData } : a))
-      sendNotify('approved', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
+      if (isOther && assignedTo === 'denise') {
+        sendNotify('approved_other_denise', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
+      } else if (!isOther) {
+        sendNotify('approved', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
+      }
+      // assigned_to='or': Or assigned it to himself — no notification needed
     }
     setApproving(null)
     setApproveNotesId(null)
@@ -721,6 +755,7 @@ export default function ClientPage() {
                   <option value="">— Select —</option>
                   <option value="presswhizz">PressWhizz</option>
                   <option value="linksme">Links.me</option>
+                  <option value="other">Other</option>
                 </select>
               </div>
             </div>
@@ -763,13 +798,16 @@ export default function ClientPage() {
             onStartEdit={startDeniseEdit}
             onCancelEdit={cancelDeniseEdit}
             savingEdit={savingDeniseEdit}
+            onMarkSent={markSent}
+            markingSent={markingId === article.id}
           />
         )
 
         const renderOrCard = article => {
           const isEditing     = editingId === article.id
+          const isOther       = article.preferred_publisher === 'other'
           const canActOnIt    = article.status === 'submitted'
-          const pricesLoading = article.status === 'submitted'
+          const pricesLoading = !isOther && article.status === 'submitted'
             && article.price_presswhizz == null
             && article.price_linksme    == null
           return (
@@ -823,31 +861,33 @@ export default function ClientPage() {
                     }
                   </div>
                 </div>
-                <div className="card-field-row prices">
-                  {pricesLoading && !isEditing ? (
-                    <div className="price-fetching" style={{ gridColumn: '1 / -1' }}>
-                      <span className="price-spinner" />
-                      Fetching prices…
-                    </div>
-                  ) : (
-                    <>
-                      <div className="card-field">
-                        <span className="cf-label">PressWhizz price</span>
-                        {isEditing
-                          ? <input name="price_presswhizz" type="number" value={editData.price_presswhizz} onChange={handleEditChange} className="edit-input" placeholder="₪" />
-                          : <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
-                        }
+                {!isOther && (
+                  <div className="card-field-row prices">
+                    {pricesLoading && !isEditing ? (
+                      <div className="price-fetching" style={{ gridColumn: '1 / -1' }}>
+                        <span className="price-spinner" />
+                        Fetching prices…
                       </div>
-                      <div className="card-field">
-                        <span className="cf-label">Links.me price</span>
-                        {isEditing
-                          ? <input name="price_linksme" type="number" value={editData.price_linksme} onChange={handleEditChange} className="edit-input" placeholder="₪" />
-                          : <span className="price-val">{fmtPrice(article.price_linksme)}</span>
-                        }
-                      </div>
-                    </>
-                  )}
-                </div>
+                    ) : (
+                      <>
+                        <div className="card-field">
+                          <span className="cf-label">PressWhizz price</span>
+                          {isEditing
+                            ? <input name="price_presswhizz" type="number" value={editData.price_presswhizz} onChange={handleEditChange} className="edit-input" placeholder="₪" />
+                            : <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
+                          }
+                        </div>
+                        <div className="card-field">
+                          <span className="cf-label">Links.me price</span>
+                          {isEditing
+                            ? <input name="price_linksme" type="number" value={editData.price_linksme} onChange={handleEditChange} className="edit-input" placeholder="₪" />
+                            : <span className="price-val">{fmtPrice(article.price_linksme)}</span>
+                          }
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 <div className="card-field">
                   <span className="cf-label">Notes for Publisher</span>
                   {isEditing
@@ -898,18 +938,39 @@ export default function ClientPage() {
                     <textarea
                       value={approveNotes}
                       onChange={e => setApproveNotes(e.target.value)}
-                      placeholder="Optional notes for publisher…"
+                      placeholder={article.preferred_publisher === 'other' ? 'Optional notes…' : 'Optional notes for publisher…'}
                       autoFocus
                     />
                     <div className="approve-notes-actions">
-                      <button
-                        className="btn-approve"
-                        style={{ marginLeft: 0 }}
-                        onClick={() => approve(article.id, approveNotes)}
-                        disabled={approving === article.id}
-                      >
-                        {approving === article.id ? 'Approving…' : 'Confirm Approve'}
-                      </button>
+                      {article.preferred_publisher === 'other' ? (
+                        <>
+                          <button
+                            className="btn-approve"
+                            style={{ marginLeft: 0 }}
+                            onClick={() => approve(article.id, approveNotes, 'denise')}
+                            disabled={approving === article.id}
+                          >
+                            {approving === article.id ? 'Approving…' : '→ Assign to Denise'}
+                          </button>
+                          <button
+                            className="btn-send"
+                            style={{ marginLeft: 0 }}
+                            onClick={() => approve(article.id, approveNotes, 'or')}
+                            disabled={approving === article.id}
+                          >
+                            {approving === article.id ? 'Approving…' : '→ Handle myself'}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="btn-approve"
+                          style={{ marginLeft: 0 }}
+                          onClick={() => approve(article.id, approveNotes)}
+                          disabled={approving === article.id}
+                        >
+                          {approving === article.id ? 'Approving…' : 'Confirm Approve'}
+                        </button>
+                      )}
                       <button className="btn-ghost" onClick={() => { setApproveNotesId(null); setApproveNotes('') }}>Cancel</button>
                     </div>
                   </div>
@@ -953,6 +1014,15 @@ export default function ClientPage() {
                           Approve
                         </button>
                       </>
+                    )}
+                    {article.status === 'approved' && article.assigned_to === 'or' && (
+                      <button
+                        className="btn-send"
+                        onClick={() => markSent(article.id)}
+                        disabled={markingId === article.id}
+                      >
+                        {markingId === article.id ? 'Updating…' : 'Mark as sent'}
+                      </button>
                     )}
                     {article.status === 'sent_to_publisher' && (
                       <>
@@ -1065,7 +1135,7 @@ export default function ClientPage() {
               </div>
 
               <div className="card-actions" style={{ flexDirection: 'column', gap: 8 }}>
-                {article.status === 'approved' && (
+                {article.status === 'approved' && article.preferred_publisher !== 'other' && (
                   <>
                     <button className="btn-send" onClick={() => markSent(article.id)} disabled={markingId === article.id || returningId === article.id}>
                       {markingId === article.id ? 'Updating…' : 'Mark as sent to publisher'}
