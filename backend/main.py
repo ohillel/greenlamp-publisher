@@ -290,6 +290,16 @@ async def manual_status_check():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/gmail/check")
+async def manual_gmail_check():
+    """Manually trigger check_gmail_notifications(debug=True) for testing without waiting for the scheduler."""
+    try:
+        await run_in_threadpool(check_gmail_notifications, True)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/notify")
 async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
     """Send a push notification to the appropriate roles for a status-change event."""
