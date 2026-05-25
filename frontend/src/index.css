@@ -780,6 +780,30 @@ body {
 }
 .clients-search::placeholder { color: var(--text-muted); }
 
+/* ── Filters bar (status buttons + month dropdown) ── */
+.filters-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.filters-bar .status-filter-bar { margin-bottom: 0; flex: 1; }
+
+.month-filter-select {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.month-filter-select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* ── Status filter bar ── */
 .status-filter-bar {
   display: flex;

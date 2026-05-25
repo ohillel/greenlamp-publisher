@@ -179,8 +179,9 @@ export default function ClientPage() {
   const [articles, setArticles] = useState([])
   const [loading,  setLoading]  = useState(true)
 
-  // Status filter (shared across all roles)
+  // Status + month filters (shared across all roles)
   const [statusFilter, setStatusFilter] = useState('all')
+  const [monthFilter,  setMonthFilter]  = useState('all')
 
   // Denise — submit form
   const [showForm,    setShowForm]    = useState(false)
@@ -637,9 +638,33 @@ export default function ClientPage() {
     { key: 'not_published',     label: 'Not Published' },
   ]
 
-  const visibleArticles = statusFilter === 'all'
-    ? articles
-    : articles.filter(a => a.status === statusFilter)
+  // Derive sorted list of distinct months present in articles (newest first)
+  const availableMonths = (() => {
+    const seen = new Set()
+    const months = []
+    for (const a of articles) {
+      if (!a.created_at) continue
+      const d   = new Date(a.created_at)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        months.push({
+          key,
+          label: d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
+        })
+      }
+    }
+    return months.sort((a, b) => b.key.localeCompare(a.key))
+  })()
+
+  const visibleArticles = articles.filter(a => {
+    const statusOk = statusFilter === 'all' || a.status === statusFilter
+    const monthOk  = monthFilter  === 'all' || (
+      a.created_at &&
+      new Date(a.created_at).toISOString().slice(0, 7) === monthFilter
+    )
+    return statusOk && monthOk
+  })
 
   return (
     <Layout>
@@ -656,7 +681,7 @@ export default function ClientPage() {
               {client?.name}
               {articles.length > 0 && (
                 <span className="article-count">
-                  {statusFilter === 'all'
+                  {statusFilter === 'all' && monthFilter === 'all'
                     ? `${articles.length} total`
                     : `${visibleArticles.length} of ${articles.length}`}
                 </span>
@@ -707,22 +732,36 @@ export default function ClientPage() {
         )}
       </div>
 
-      {/* ── Status filter bar ── */}
-      <div className="status-filter-bar">
-        {STATUS_FILTERS.map(({ key, label }) => {
-          const count = key === 'all' ? articles.length : articles.filter(a => a.status === key).length
-          return (
-            <button
-              key={key}
-              className={`status-filter-btn${statusFilter === key ? ' active' : ''}${count === 0 && key !== 'all' ? ' empty' : ''}`}
-              onClick={() => setStatusFilter(key)}
-              data-status={key}
-            >
-              {label}
-              {count > 0 && <span className="filter-count">{count}</span>}
-            </button>
-          )
-        })}
+      {/* ── Filters bar: status buttons + month dropdown ── */}
+      <div className="filters-bar">
+        <div className="status-filter-bar">
+          {STATUS_FILTERS.map(({ key, label }) => {
+            const count = key === 'all' ? articles.length : articles.filter(a => a.status === key).length
+            return (
+              <button
+                key={key}
+                className={`status-filter-btn${statusFilter === key ? ' active' : ''}${count === 0 && key !== 'all' ? ' empty' : ''}`}
+                onClick={() => setStatusFilter(key)}
+                data-status={key}
+              >
+                {label}
+                {count > 0 && <span className="filter-count">{count}</span>}
+              </button>
+            )
+          })}
+        </div>
+        {availableMonths.length > 1 && (
+          <select
+            className="month-filter-select"
+            value={monthFilter}
+            onChange={e => setMonthFilter(e.target.value)}
+          >
+            <option value="all">All months</option>
+            {availableMonths.map(({ key, label }) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {successMsg && <div className="success-banner">✓ {successMsg}</div>}
