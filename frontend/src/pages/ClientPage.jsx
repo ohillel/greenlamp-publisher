@@ -97,15 +97,14 @@ function DeniseArticleCard({
             {article.published_url && (
               <div className="card-field">
                 <span className="cf-label" style={{ color: '#16a34a' }}>Published URL</span>
-                <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
-                  {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
-                </a>
-              </div>
-            )}
-            {article.published_at && (
-              <div className="card-field">
-                <span className="cf-label" style={{ color: '#16a34a' }}>Published on</span>
-                <span style={{ color: '#16a34a', fontSize: 13 }}>{fmtDate(article.published_at)}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
+                    {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
+                  </a>
+                  {article.published_at && (
+                    <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}>{fmtDate(article.published_at)}</span>
+                  )}
+                </span>
               </div>
             )}
           </>
@@ -875,15 +874,14 @@ export default function ClientPage() {
                 {article.published_url && !isEditing && (
                   <div className="card-field">
                     <span className="cf-label" style={{ color: '#16a34a' }}>Published URL</span>
-                    <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
-                      {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
-                    </a>
-                  </div>
-                )}
-                {article.published_at && !isEditing && (
-                  <div className="card-field">
-                    <span className="cf-label" style={{ color: '#16a34a' }}>Published on</span>
-                    <span style={{ color: '#16a34a', fontSize: 13 }}>{fmtDate(article.published_at)}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
+                        {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
+                      </a>
+                      {article.published_at && (
+                        <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}>{fmtDate(article.published_at)}</span>
+                      )}
+                    </span>
                   </div>
                 )}
                 {saveError && isEditing && <p className="form-error" style={{ marginTop: 8 }}>{saveError}</p>}
@@ -1054,15 +1052,14 @@ export default function ClientPage() {
                 {article.published_url && (
                   <div className="card-field">
                     <span className="cf-label" style={{ color: '#16a34a' }}>Published URL</span>
-                    <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
-                      {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
-                    </a>
-                  </div>
-                )}
-                {article.published_at && (
-                  <div className="card-field">
-                    <span className="cf-label" style={{ color: '#16a34a' }}>Published on</span>
-                    <span style={{ color: '#16a34a', fontSize: 13 }}>{fmtDate(article.published_at)}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
+                        {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
+                      </a>
+                      {article.published_at && (
+                        <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}>{fmtDate(article.published_at)}</span>
+                      )}
+                    </span>
                   </div>
                 )}
               </div>
