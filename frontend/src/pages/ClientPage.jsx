@@ -750,7 +750,7 @@ export default function ClientPage() {
             )
           })}
         </div>
-        {availableMonths.length > 1 && (
+        {availableMonths.length > 0 && (
           <select
             className="month-filter-select"
             value={monthFilter}
