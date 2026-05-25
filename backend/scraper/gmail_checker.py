@@ -398,11 +398,14 @@ def _process_linksme_email(service, msg: dict, sb, can_modify: bool, debug: bool
     if debug:
         print(f"  [gmail_checker/lm] body preview: {body[:400]!r}")
 
-    # Extract the report URL from the email
+    # Extract the report URL from the email.
+    # The broad fallback is intentionally restricted to /project/ paths to
+    # avoid accidentally matching static asset URLs (images, fonts, etc.)
+    # that appear earlier in the HTML body.
     nav_url = None
     for pattern in [
         r'https://app\.links\.me/project/\d+/report[^\s"<>\']*',
-        r'https://app\.links\.me/[^\s"<>\']+',
+        r'https://app\.links\.me/project/[^\s"<>\']+',
     ]:
         m = re.search(pattern, body)
         if m:
