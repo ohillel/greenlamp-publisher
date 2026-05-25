@@ -732,6 +732,12 @@ export default function ClientPage() {
         )}
       </div>
 
+      {/* ── DEBUG ── */}
+      {console.log('[monthFilter debug] articles:', articles.length, 'availableMonths:', availableMonths)}
+      <select style={{ border: '2px solid red', background: 'yellow', fontSize: 16, marginBottom: 8 }}>
+        <option>test</option>
+      </select>
+
       {/* ── Filters bar: status buttons + month dropdown ── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
         <div className="status-filter-bar" style={{ marginBottom: 0, flex: 1 }}>
