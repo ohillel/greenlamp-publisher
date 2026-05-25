@@ -115,10 +115,15 @@ def _mark_read(service, msg_id: str) -> None:
 
 def _normalize_domain(text: str) -> str:
     t = text.strip().lower()
+    # Extract the URL portion if it's embedded in surrounding text
+    # e.g. "- https://www.cpomagazine.com" → "https://www.cpomagazine.com"
+    m = re.search(r'https?://\S+', t)
+    if m:
+        t = m.group(0)
     for prefix in ("https://", "http://", "www."):
         if t.startswith(prefix):
             t = t[len(prefix):]
-    return t.split("/")[0].split("?")[0].rstrip(".")
+    return t.split("/")[0].split("?")[0].rstrip(".,")
 
 
 def _notify(sb, new_status: str, client_name: str, magazine: str) -> None:
