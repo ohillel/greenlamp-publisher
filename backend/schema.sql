@@ -78,3 +78,9 @@ ALTER TABLE articles ADD COLUMN IF NOT EXISTS published_url TEXT;
 
 -- ── Migration: add google_doc_url to clients ─────────────────────────────────
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS google_doc_url TEXT;
+
+-- ── Migration: add reminder_sent column ──────────────────────────────────────
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT FALSE;
+
+-- ── Migration: add published_at column ───────────────────────────────────────
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;

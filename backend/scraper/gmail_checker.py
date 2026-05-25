@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -267,7 +268,7 @@ def _process_presswhizz_email(service, msg: dict, sb, can_modify: bool, debug: b
         print(f"  [gmail_checker/pw] no article with status=sent_to_publisher+presswhizz for portal={portal!r}")
         return False
 
-    update: dict = {"status": "published"}
+    update: dict = {"status": "published", "published_at": datetime.now(timezone.utc).isoformat()}
     if published_url:
         update["published_url"] = published_url
     sb.from_("articles").update(update).eq("id", matched_id).execute()
@@ -441,6 +442,8 @@ def _process_linksme_email(service, msg: dict, sb, can_modify: bool, debug: bool
         client_name = (article.get("clients") or {}).get("name", "")
 
         update: dict = {"status": new_status}
+        if new_status == "published":
+            update["published_at"] = datetime.now(timezone.utc).isoformat()
         if pub_url:
             update["published_url"] = pub_url
         sb.from_("articles").update(update).eq("id", article_id).execute()

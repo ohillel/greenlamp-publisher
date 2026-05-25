@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase'
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
+const fmtDate  = ts => ts ? new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -58,6 +59,9 @@ function DeniseArticleCard({
             : (article.magazine ?? '—')
           }
         </span>
+        {!isEditing && article.created_at && (
+          <span className="card-date">{fmtDate(article.created_at)}</span>
+        )}
         <StatusBadge status={article.status} />
       </div>
       <div className="card-body">
@@ -96,6 +100,12 @@ function DeniseArticleCard({
                 <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
                   {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
                 </a>
+              </div>
+            )}
+            {article.published_at && (
+              <div className="card-field">
+                <span className="cf-label" style={{ color: '#16a34a' }}>Published on</span>
+                <span style={{ color: '#16a34a', fontSize: 13 }}>{fmtDate(article.published_at)}</span>
               </div>
             )}
           </>
@@ -390,7 +400,7 @@ export default function ClientPage() {
     try {
       const { error } = await supabase
         .from('articles')
-        .update({ status: 'submitted' })
+        .update({ status: 'submitted', reminder_sent: false })
         .eq('id', id)
       if (error) throw error
 
@@ -454,7 +464,7 @@ export default function ClientPage() {
   const approve = async (id, notes) => {
     setApproving(id)
     const article    = articles.find(a => a.id === id)
-    const updateData = { status: 'approved' }
+    const updateData = { status: 'approved', reminder_sent: false }
     // Default chosen_publisher to preferred_publisher if Or didn't explicitly set one
     if (!article?.chosen_publisher && article?.preferred_publisher) {
       updateData.chosen_publisher = article.preferred_publisher
@@ -483,6 +493,7 @@ export default function ClientPage() {
     const { error } = await supabase.from('articles').update({
       status:        'submitted',
       return_reason: reason || null,
+      reminder_sent: false,
     }).eq('id', id)
     if (!error) {
       setArticles(prev => prev.map(a =>
@@ -499,7 +510,7 @@ export default function ClientPage() {
     setOverridingId(id)
     setPublishUrlError('')
     const article = articles.find(a => a.id === id)
-    const update = { status: 'published', published_url: url || null }
+    const update = { status: 'published', published_url: url || null, published_at: new Date().toISOString() }
 
     console.log('[confirmPublished] updating article', id, 'with', update)
     const { data, error } = await supabase
@@ -771,6 +782,9 @@ export default function ClientPage() {
                     : (article.magazine ?? '—')
                   }
                 </span>
+                {!isEditing && article.created_at && (
+                  <span className="card-date">{fmtDate(article.created_at)}</span>
+                )}
                 <StatusBadge status={article.status} />
               </div>
 
@@ -864,6 +878,12 @@ export default function ClientPage() {
                     <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
                       {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
                     </a>
+                  </div>
+                )}
+                {article.published_at && !isEditing && (
+                  <div className="card-field">
+                    <span className="cf-label" style={{ color: '#16a34a' }}>Published on</span>
+                    <span style={{ color: '#16a34a', fontSize: 13 }}>{fmtDate(article.published_at)}</span>
                   </div>
                 )}
                 {saveError && isEditing && <p className="form-error" style={{ marginTop: 8 }}>{saveError}</p>}
@@ -987,6 +1007,9 @@ export default function ClientPage() {
             <div key={article.id} id={`article-card-${article.id}`} className="article-card">
               <div className="card-header">
                 <span className="card-magazine">{article.magazine ?? '—'}</span>
+                {article.created_at && (
+                  <span className="card-date">{fmtDate(article.created_at)}</span>
+                )}
                 <StatusBadge status={article.status} />
               </div>
               <div className="card-body">
@@ -1034,6 +1057,12 @@ export default function ClientPage() {
                     <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
                       {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
                     </a>
+                  </div>
+                )}
+                {article.published_at && (
+                  <div className="card-field">
+                    <span className="cf-label" style={{ color: '#16a34a' }}>Published on</span>
+                    <span style={{ color: '#16a34a', fontSize: 13 }}>{fmtDate(article.published_at)}</span>
                   </div>
                 )}
               </div>

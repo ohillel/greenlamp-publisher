@@ -14,6 +14,7 @@ load_dotenv()
 from scraper.prices import fetch_prices                      # noqa: E402
 from scraper.status_checker import run_status_check          # noqa: E402
 from scraper.gmail_checker import check_gmail_notifications  # noqa: E402
+from scraper.reminder_checker import check_stale_articles    # noqa: E402
 from scraper.push_notifications import send_push_to_roles    # noqa: E402
 from scraper.email_notifications import send_email_to_roles  # noqa: E402
 
@@ -44,8 +45,16 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        check_stale_articles,
+        trigger='interval',
+        hours=1,
+        id='reminder_check',
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
-    print(f"[scheduler] started — status check + Gmail check every {CHECK_INTERVAL_MINUTES} minutes")
+    print(f"[scheduler] started — status check + Gmail check every {CHECK_INTERVAL_MINUTES} minutes, reminder check every hour")
     yield
     scheduler.shutdown(wait=False)
     print("[scheduler] stopped")
