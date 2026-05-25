@@ -502,7 +502,7 @@ def check_gmail_notifications(debug: bool = False) -> None:
         ),
         (
             "Links.me",
-            'is:unread from:info@links.me subject:"status has changed"',
+            'from:info@links.me subject:"status has changed" newer_than:1d',
             lambda msg: _process_linksme_email(service, msg, sb, can_modify, debug),
         ),
     ]
