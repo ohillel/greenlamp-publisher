@@ -733,8 +733,8 @@ export default function ClientPage() {
       </div>
 
       {/* ── Filters bar: status buttons + month dropdown ── */}
-      <div className="filters-bar">
-        <div className="status-filter-bar">
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <div className="status-filter-bar" style={{ marginBottom: 0, flex: 1 }}>
           {STATUS_FILTERS.map(({ key, label }) => {
             const count = key === 'all' ? articles.length : articles.filter(a => a.status === key).length
             return (
@@ -750,18 +750,26 @@ export default function ClientPage() {
             )
           })}
         </div>
-        {availableMonths.length > 0 && (
-          <select
-            className="month-filter-select"
-            value={monthFilter}
-            onChange={e => setMonthFilter(e.target.value)}
-          >
-            <option value="all">All months</option>
-            {availableMonths.map(({ key, label }) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
-        )}
+        <select
+          value={monthFilter}
+          onChange={e => setMonthFilter(e.target.value)}
+          style={{
+            height: 32,
+            padding: '0 10px',
+            border: '1px solid #d1d5db',
+            borderRadius: 6,
+            background: '#ffffff',
+            color: '#111827',
+            fontSize: 13,
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <option value="all">All months</option>
+          {availableMonths.map(({ key, label }) => (
+            <option key={key} value={key}>{label}</option>
+          ))}
+        </select>
       </div>
 
       {successMsg && <div className="success-banner">✓ {successMsg}</div>}
