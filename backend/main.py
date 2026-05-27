@@ -37,14 +37,14 @@ async def lifespan(app: FastAPI):
         max_instances=1,       # never overlap — wait for previous run to finish
         coalesce=True,         # skip missed fires if the server was paused
     )
-    scheduler.add_job(
-        check_gmail_notifications,
-        trigger='interval',
-        minutes=CHECK_INTERVAL_MINUTES,
-        id='gmail_check',
-        max_instances=1,
-        coalesce=True,
-    )
+    # scheduler.add_job(
+    #     check_gmail_notifications,
+    #     trigger='interval',
+    #     minutes=CHECK_INTERVAL_MINUTES,
+    #     id='gmail_check',
+    #     max_instances=1,
+    #     coalesce=True,
+    # )
     scheduler.add_job(
         check_stale_articles,
         trigger='interval',
