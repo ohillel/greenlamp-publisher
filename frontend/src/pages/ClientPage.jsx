@@ -33,13 +33,13 @@ const PUBLISHERS = [
 ]
 const PUB_LABEL = { presswhizz: 'PressWhizz', linksme: 'Links.me', other: 'Other' }
 
-const EMPTY_FORM = { google_doc_url: '', magazine: '', preferred_publisher: '' }
+const EMPTY_FORM = { google_doc_url: '', magazine: '', preferred_publisher: '', custom_publisher_note: '' }
 const EMPTY_EDIT = {
   google_doc_url: '', magazine: '', preferred_publisher: '',
   chosen_publisher: '', price_presswhizz: '', price_linksme: '',
   publisher_notes: '',
 }
-const EMPTY_DENISE_EDIT = { google_doc_url: '', magazine: '', preferred_publisher: '' }
+const EMPTY_DENISE_EDIT = { google_doc_url: '', magazine: '', preferred_publisher: '', custom_publisher_note: '' }
 
 // ── Denise article card ────────────────────────────────────────────────────────
 
@@ -84,6 +84,18 @@ function DeniseArticleCard({
                 <option value="other">Other</option>
               </select>
             </div>
+            {editData.preferred_publisher === 'other' && (
+              <div className="denise-edit-field">
+                <label>Publisher destination</label>
+                <input
+                  type="text"
+                  name="custom_publisher_note"
+                  value={editData.custom_publisher_note}
+                  onChange={onEditChange}
+                  placeholder="e.g. Outreach.io, direct email to editor…"
+                />
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -99,6 +111,12 @@ function DeniseArticleCard({
                 {PUB_LABEL[article.preferred_publisher] ?? article.preferred_publisher ?? '—'}
               </span>
             </div>
+            {article.custom_publisher_note && (
+              <div className="card-field">
+                <span className="cf-label">Publisher destination</span>
+                <span style={{ fontSize: 13, color: 'var(--text)', fontStyle: 'italic' }}>{article.custom_publisher_note}</span>
+              </div>
+            )}
             {article.publisher_notes && !isDraft && (
               <div className="card-field">
                 <div className="publisher-notes-label">Notes from Or</div>
@@ -206,9 +224,10 @@ export default function ClientPage() {
   const [saveError, setSaveError] = useState('')
 
   // Or — approve with optional notes
-  const [approving,      setApproving]      = useState(null)   // id being approved
-  const [approveNotesId, setApproveNotesId] = useState(null)   // id showing notes input
-  const [approveNotes,   setApproveNotes]   = useState('')
+  const [approving,          setApproving]          = useState(null)   // id being approved
+  const [approveNotesId,     setApproveNotesId]     = useState(null)   // id showing notes input
+  const [approveNotes,       setApproveNotes]       = useState('')
+  const [approveCustomNote,  setApproveCustomNote]  = useState('')
 
   // Publisher
   const [markingId,   setMarkingId]   = useState(null)
@@ -326,9 +345,10 @@ export default function ClientPage() {
   const startDeniseEdit = article => {
     setEditingDeniseId(article.id)
     setEditingDeniseData({
-      google_doc_url:      article.google_doc_url      ?? '',
-      magazine:            article.magazine            ?? '',
-      preferred_publisher: article.preferred_publisher ?? '',
+      google_doc_url:        article.google_doc_url        ?? '',
+      magazine:              article.magazine              ?? '',
+      preferred_publisher:   article.preferred_publisher   ?? '',
+      custom_publisher_note: article.custom_publisher_note ?? '',
     })
   }
 
@@ -344,9 +364,10 @@ export default function ClientPage() {
     const newMagazine    = editingDeniseData.magazine || null
 
     const { error } = await supabase.from('articles').update({
-      google_doc_url:      editingDeniseData.google_doc_url      || null,
-      magazine:            newMagazine,
-      preferred_publisher: editingDeniseData.preferred_publisher || null,
+      google_doc_url:        editingDeniseData.google_doc_url        || null,
+      magazine:              newMagazine,
+      preferred_publisher:   editingDeniseData.preferred_publisher   || null,
+      custom_publisher_note: editingDeniseData.custom_publisher_note || null,
       // Clear stale prices when magazine changes so the new fetch is authoritative
       ...(magazineChanged ? { price_presswhizz: null, price_linksme: null } : {}),
     }).eq('id', id)
@@ -385,7 +406,10 @@ export default function ClientPage() {
     try {
       const { data: article, error } = await supabase
         .from('articles')
-        .insert({ client_id: clientId, google_doc_url, magazine, preferred_publisher, status: 'draft' })
+        .insert({
+          client_id: clientId, google_doc_url, magazine, preferred_publisher, status: 'draft',
+          custom_publisher_note: form.custom_publisher_note || null,
+        })
         .select()
         .single()
       if (error) throw error
@@ -481,7 +505,7 @@ export default function ClientPage() {
 
   // ── Or: approve (with optional notes; assignedTo only used for "other" articles) ──
 
-  const approve = async (id, notes, assignedTo = null) => {
+  const approve = async (id, notes, assignedTo = null, customNote = null) => {
     setApproving(id)
     const article    = articles.find(a => a.id === id)
     const isOther    = article?.preferred_publisher === 'other'
@@ -499,6 +523,7 @@ export default function ClientPage() {
     }
 
     if (notes) updateData.publisher_notes = notes
+    if (customNote) updateData.custom_publisher_note = customNote
     const { error } = await supabase.from('articles').update(updateData).eq('id', id)
     if (!error) {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, ...updateData } : a))
@@ -512,6 +537,7 @@ export default function ClientPage() {
     setApproving(null)
     setApproveNotesId(null)
     setApproveNotes('')
+    setApproveCustomNote('')
   }
 
   // ── Publisher: return article to Or ─────────────────────────────────────────
@@ -805,6 +831,18 @@ export default function ClientPage() {
                   <option value="other">Other</option>
                 </select>
               </div>
+              {form.preferred_publisher === 'other' && (
+                <div className="field">
+                  <label>Publisher destination</label>
+                  <input
+                    type="text"
+                    name="custom_publisher_note"
+                    value={form.custom_publisher_note}
+                    onChange={handleFormChange}
+                    placeholder="e.g. Outreach.io, direct email to editor…"
+                  />
+                </div>
+              )}
             </div>
             {submitError && <p className="form-error">{submitError}</p>}
             <button type="submit" className="btn-primary submit-btn" disabled={submitting}>
@@ -952,6 +990,12 @@ export default function ClientPage() {
                       : <span className="cf-empty">—</span>
                   }
                 </div>
+                {article.custom_publisher_note && !isEditing && (
+                  <div className="card-field">
+                    <span className="cf-label">Publisher destination</span>
+                    <span style={{ fontSize: 13, color: 'var(--text)', fontStyle: 'italic' }}>{article.custom_publisher_note}</span>
+                  </div>
+                )}
                 {article.return_reason && !isEditing && (
                   <div className="card-field">
                     <span className="cf-label" style={{ color: '#dc2626' }}>Returned — reason</span>
@@ -988,13 +1032,23 @@ export default function ClientPage() {
                       placeholder={article.preferred_publisher === 'other' ? 'Optional notes…' : 'Optional notes for publisher…'}
                       autoFocus
                     />
+                    {article.preferred_publisher === 'other' && (
+                      <input
+                        type="text"
+                        value={approveCustomNote}
+                        onChange={e => setApproveCustomNote(e.target.value)}
+                        placeholder="Publisher destination (e.g. Outreach.io, direct email…)"
+                        defaultValue={article.custom_publisher_note ?? ''}
+                        style={{ marginTop: 6, width: '100%', padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                      />
+                    )}
                     <div className="approve-notes-actions">
                       {article.preferred_publisher === 'other' ? (
                         <>
                           <button
                             className="btn-approve"
                             style={{ marginLeft: 0 }}
-                            onClick={() => approve(article.id, approveNotes, 'denise')}
+                            onClick={() => approve(article.id, approveNotes, 'denise', approveCustomNote || null)}
                             disabled={approving === article.id}
                           >
                             {approving === article.id ? 'Approving…' : '→ Assign to Denise'}
@@ -1002,7 +1056,7 @@ export default function ClientPage() {
                           <button
                             className="btn-send"
                             style={{ marginLeft: 0 }}
-                            onClick={() => approve(article.id, approveNotes, 'or')}
+                            onClick={() => approve(article.id, approveNotes, 'or', approveCustomNote || null)}
                             disabled={approving === article.id}
                           >
                             {approving === article.id ? 'Approving…' : '→ Handle myself'}
@@ -1012,13 +1066,13 @@ export default function ClientPage() {
                         <button
                           className="btn-approve"
                           style={{ marginLeft: 0 }}
-                          onClick={() => approve(article.id, approveNotes)}
+                          onClick={() => approve(article.id, approveNotes, null, approveCustomNote || null)}
                           disabled={approving === article.id}
                         >
                           {approving === article.id ? 'Approving…' : 'Confirm Approve'}
                         </button>
                       )}
-                      <button className="btn-ghost" onClick={() => { setApproveNotesId(null); setApproveNotes('') }}>Cancel</button>
+                      <button className="btn-ghost" onClick={() => { setApproveNotesId(null); setApproveNotes(''); setApproveCustomNote('') }}>Cancel</button>
                     </div>
                   </div>
                 ) : publishUrlId === article.id ? (
@@ -1158,6 +1212,12 @@ export default function ClientPage() {
                       <span className="cf-label">Links.me</span>
                       <span className="price-val">{fmtPrice(article.price_linksme)}</span>
                     </div>
+                  </div>
+                )}
+                {article.custom_publisher_note && (
+                  <div className="card-field" style={{ marginTop: 8 }}>
+                    <span className="cf-label">Publisher destination</span>
+                    <span style={{ fontSize: 13, color: 'var(--text)', fontStyle: 'italic' }}>{article.custom_publisher_note}</span>
                   </div>
                 )}
                 {article.publisher_notes && (

@@ -88,3 +88,7 @@ ALTER TABLE articles ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;
 -- ── Migration: add assigned_to column (for "Other" publisher flow) ────────────
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS assigned_to TEXT;
 -- values: 'denise' | 'or' | null (presswhizz/linksme articles always null)
+
+-- ── Migration: add custom_publisher_note column ──────────────────────────────
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS custom_publisher_note TEXT;
+-- Free-text destination for "Other" publisher articles (e.g. "Outreach.io")
