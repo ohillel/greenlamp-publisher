@@ -167,10 +167,25 @@ def _scrape_presswhizz_order(order_url: str, debug: bool) -> dict:
         page.goto(order_url, wait_until="load")
         page.wait_for_timeout(3000)
 
-        # Log in if redirected to auth page
-        if any(p in page.url for p in ("/login", "/signin", "/auth")) or \
+        # Detect session expiry: either redirect to login page OR a 500 error page
+        _body_preview = ""
+        try:
+            _body_preview = page.inner_text("body")[:300].lower()
+        except Exception:
+            pass
+        _is_error_page = (
+            "500" in _body_preview[:80] or
+            "internal server error" in _body_preview or
+            "something went wrong" in _body_preview or
+            "server error" in _body_preview
+        )
+
+        # Log in if redirected to auth page or got a 500 (expired session)
+        if _is_error_page or \
+           any(p in page.url for p in ("/login", "/signin", "/auth")) or \
            page.query_selector('input[type="password"]'):
-            print("  [gmail_checker/pw] session expired — logging in…")
+            reason = "500 error page" if _is_error_page else "login redirect"
+            print(f"  [gmail_checker/pw] session expired ({reason}) — logging in…")
             page.goto(BASE_PW, wait_until="load")
             page.wait_for_timeout(2000)
             page.fill(
@@ -402,6 +417,8 @@ def _process_linksme_email(service, msg: dict, sb, can_modify: bool, debug: bool
     # The broad fallback is intentionally restricted to /project/ paths to
     # avoid accidentally matching static asset URLs (images, fonts, etc.)
     # that appear earlier in the HTML body.
+    # After extraction we ensure the URL ends with /report — the email
+    # sometimes links to /projects (the list page) instead.
     nav_url = None
     for pattern in [
         r'https://app\.links\.me/project/\d+/report[^\s"<>\']*',
@@ -411,6 +428,15 @@ def _process_linksme_email(service, msg: dict, sb, can_modify: bool, debug: bool
         if m:
             nav_url = m.group(0).rstrip(".,>)")
             break
+
+    if nav_url:
+        # Normalise: strip any trailing query/fragment then ensure path ends /report
+        base = nav_url.split("?")[0].split("#")[0].rstrip("/")
+        if not base.endswith("/report"):
+            # Replace /projects suffix or just append /report
+            base = re.sub(r'/projects?$', '', base)
+            base = base.rstrip("/") + "/report"
+        nav_url = base
 
     if not nav_url:
         print("  [gmail_checker/lm] no Links.me URL found in email body — skipping")
