@@ -29,14 +29,14 @@ CHECK_INTERVAL_MINUTES = 10
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
-    scheduler.add_job(
-        run_status_check,
-        trigger='interval',
-        minutes=CHECK_INTERVAL_MINUTES,
-        id='status_check',
-        max_instances=1,       # never overlap — wait for previous run to finish
-        coalesce=True,         # skip missed fires if the server was paused
-    )
+    # scheduler.add_job(
+    #     run_status_check,
+    #     trigger='interval',
+    #     minutes=CHECK_INTERVAL_MINUTES,
+    #     id='status_check',
+    #     max_instances=1,       # never overlap — wait for previous run to finish
+    #     coalesce=True,         # skip missed fires if the server was paused
+    # )
     # scheduler.add_job(
     #     check_gmail_notifications,
     #     trigger='interval',
