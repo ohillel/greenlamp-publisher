@@ -318,12 +318,34 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
         context = browser.new_context(**load_session_kwargs("linksme"))
         page    = context.new_page()
 
+        print(f"  [gmail_checker/lm] navigating to report: {nav_url}")
         page.goto(nav_url, wait_until="load")
         page.wait_for_timeout(3000)
 
+        # Always log page title + first 500 chars of body for debugging
+        try:
+            _page_title = page.title()
+        except Exception:
+            _page_title = "(error reading title)"
+        try:
+            _body_preview = page.inner_text("body")[:500]
+        except Exception:
+            _body_preview = "(error reading body)"
+        print(f"  [gmail_checker/lm] final URL: {page.url}")
+        print(f"  [gmail_checker/lm] page title: {_page_title!r}")
+        print(f"  [gmail_checker/lm] body preview: {_body_preview!r}")
+
         if _is_on_login(page):
+            print("  [gmail_checker/lm] on login page — logging in…")
             _login(page, debug)
             save_session(context, "linksme")
+            # Re-log after login
+            try:
+                _body_preview = page.inner_text("body")[:500]
+            except Exception:
+                _body_preview = "(error reading body)"
+            print(f"  [gmail_checker/lm] post-login URL: {page.url}")
+            print(f"  [gmail_checker/lm] post-login body: {_body_preview!r}")
 
         if debug:
             debug_dir = Path(__file__).parent / "debug_screenshots"
@@ -333,6 +355,7 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
             )
 
         for page_num in range(1, 6):   # up to 5 pages
+            rows_on_page = 0
             for tr in page.query_selector_all("tr"):
                 cells = tr.query_selector_all("td")
                 if len(cells) < 2:
@@ -345,11 +368,14 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
                 if not site_dom or "." not in site_dom or len(site_dom) < 4:
                     continue
 
+                rows_on_page += 1
                 # Scan remaining cells for a recognised status string
-                for cell in cells[1:]:
-                    ct = cell.inner_text().strip().lower()
+                cell_texts = [c.inner_text().strip() for c in cells[1:]]
+                matched_status = False
+                for idx, ct in enumerate(cell_texts):
+                    ct_lower = ct.lower()
 
-                    if ct.startswith("published") or ct.startswith("confirmation request"):
+                    if ct_lower.startswith("published") or ct_lower.startswith("confirmation request"):
                         # Try to find the published article URL in this row
                         pub_url = None
                         for c in cells:
@@ -367,16 +393,23 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
                             "published_url": pub_url,
                         })
                         print(f"  [gmail_checker/lm] {site_dom} → published (url={pub_url})")
+                        matched_status = True
                         break
 
-                    elif ct.startswith("rejected"):
+                    elif ct_lower.startswith("rejected"):
                         rows_out.append({
                             "domain":        site_dom,
                             "status":        "not_published",
                             "published_url": None,
                         })
                         print(f"  [gmail_checker/lm] {site_dom} → not_published")
+                        matched_status = True
                         break
+
+                if not matched_status:
+                    print(f"  [gmail_checker/lm] row domain={site_dom!r} — no status match, cell texts: {cell_texts}")
+
+            print(f"  [gmail_checker/lm] page {page_num}: {rows_on_page} data row(s) scanned, {len(rows_out)} settled so far")
 
             # Pagination
             next_btn = None
