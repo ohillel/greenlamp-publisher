@@ -447,29 +447,14 @@ def _process_linksme_email(service, msg: dict, sb, can_modify: bool, debug: bool
         print(f"  [gmail_checker/lm] body preview: {body[:400]!r}")
 
     # Extract the report URL from the email.
-    # The broad fallback is intentionally restricted to /project/ paths to
-    # avoid accidentally matching static asset URLs (images, fonts, etc.)
-    # that appear earlier in the HTML body.
-    # After extraction we ensure the URL ends with /report — the email
-    # sometimes links to /projects (the list page) instead.
+    # Restricted to /project/ paths to avoid accidentally matching static
+    # asset URLs (images, fonts, etc.) that appear earlier in the HTML body.
+    # The email button links to /project/{id}/projects which redirects
+    # automatically to the correct report page — use it as-is.
     nav_url = None
-    for pattern in [
-        r'https://app\.links\.me/project/\d+/report[^\s"<>\']*',
-        r'https://app\.links\.me/project/[^\s"<>\']+',
-    ]:
-        m = re.search(pattern, body)
-        if m:
-            nav_url = m.group(0).rstrip(".,>)")
-            break
-
-    if nav_url:
-        # Normalise: strip any trailing query/fragment then ensure path ends /report
-        base = nav_url.split("?")[0].split("#")[0].rstrip("/")
-        if not base.endswith("/report"):
-            # Replace /projects suffix or just append /report
-            base = re.sub(r'/projects?$', '', base)
-            base = base.rstrip("/") + "/report"
-        nav_url = base
+    m = re.search(r'https://app\.links\.me/project/[^\s"<>\']+', body)
+    if m:
+        nav_url = m.group(0).rstrip(".,>)")
 
     if not nav_url:
         print("  [gmail_checker/lm] no Links.me URL found in email body — skipping")
