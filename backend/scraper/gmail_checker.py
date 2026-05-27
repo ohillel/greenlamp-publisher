@@ -341,22 +341,20 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
             save_session(context, "linksme")
             print(f"  [gmail_checker/lm] post-login URL: {page.url}")
 
-            # After login the browser lands on the dashboard, not the report.
-            # Build the report URL by replacing /projects with /report.
-            report_url = re.sub(r'/projects?(/.*)?$', '/report', nav_url.split("?")[0].rstrip("/"))
-            print(f"  [gmail_checker/lm] navigating to report after login: {report_url}")
-            page.goto(report_url, wait_until="load")
-            # Wait for the report table to appear (or fall back after 10 s)
+            # Re-navigate to the original email link — it will now redirect
+            # to the correct report page since the session is established.
+            print(f"  [gmail_checker/lm] re-navigating to email link: {nav_url}")
+            page.goto(nav_url, wait_until="load")
             try:
                 page.wait_for_selector("table", timeout=10000)
             except Exception:
                 page.wait_for_timeout(5000)
-            print(f"  [gmail_checker/lm] report URL after navigation: {page.url}")
+            print(f"  [gmail_checker/lm] post-redirect URL: {page.url}")
             try:
                 _body_preview = page.inner_text("body")[:500]
             except Exception:
                 _body_preview = "(error reading body)"
-            print(f"  [gmail_checker/lm] report body preview: {_body_preview!r}")
+            print(f"  [gmail_checker/lm] post-redirect body: {_body_preview!r}")
 
         if debug:
             debug_dir = Path(__file__).parent / "debug_screenshots"
@@ -457,21 +455,23 @@ def _process_linksme_email(service, msg: dict, sb, can_modify: bool, debug: bool
     if debug:
         print(f"  [gmail_checker/lm] body preview: {body[:400]!r}")
 
-    # Extract the report URL from the email.
-    # Restricted to /project/ paths to avoid accidentally matching static
-    # asset URLs (images, fonts, etc.) that appear earlier in the HTML body.
-    # The email button links to /project/{id}/projects which redirects
-    # automatically to the correct report page — use it as-is.
+    # Use the "Log in to your account" button href from the email.
+    # This URL handles auth and redirects directly to the correct report page.
     nav_url = None
-    m = re.search(r'https://app\.links\.me/project/[^\s"<>\']+', body)
+    m = re.search(r'href=["\']?(https://app\.links\.me/[^\s"<>\']+)["\']?[^>]*>\s*Log in to your account', body, re.IGNORECASE)
     if m:
-        nav_url = m.group(0).rstrip(".,>)")
+        nav_url = m.group(1).rstrip(".,>)")
+    # Fallback: any links.me href that contains /project/
+    if not nav_url:
+        m = re.search(r'href=["\']?(https://app\.links\.me/project/[^\s"<>\']+)["\']?', body)
+        if m:
+            nav_url = m.group(1).rstrip(".,>)")
 
     if not nav_url:
         print("  [gmail_checker/lm] no Links.me URL found in email body — skipping")
         return False
+    print(f"  [gmail_checker/lm] email nav URL: {nav_url}")
 
-    print(f"  [gmail_checker/lm] navigating to: {nav_url}")
     rows = _scrape_linksme_report(nav_url, debug)
 
     if not rows:
