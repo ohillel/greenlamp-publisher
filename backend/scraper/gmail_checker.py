@@ -401,7 +401,8 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
 
             for _i, _dm in enumerate(_doms):
                 _raw  = _dm.group(1)
-                _dom  = lm_norm(_raw)
+                # Use the same _normalize_domain as the Supabase lookup side
+                _dom  = _normalize_domain(_raw)
 
                 if not _dom or "." not in _dom or len(_dom) < 5:
                     continue
@@ -481,16 +482,19 @@ def _process_linksme_email(service, msg: dict, sb, can_modify: bool, debug: bool
 
     dom_to_article: dict[str, dict] = {}
     for row in (res.data or []):
-        dom = _normalize_domain(row.get("magazine") or "")
+        raw_mag = row.get("magazine") or ""
+        # Normalize: strip https://, http://, www., path, query, trailing punctuation
+        dom = _normalize_domain(raw_mag)
         if dom:
             dom_to_article[dom] = row
+    print(f"  [gmail_checker/lm] Supabase domains: {list(dom_to_article.keys())}")
 
     handled_any = False
     for row in rows:
         dom     = row["domain"]
         article = dom_to_article.get(dom)
         if not article:
-            print(f"  [gmail_checker/lm] no article found for domain {dom!r}")
+            print(f"  [gmail_checker/lm] no match for scraped domain {dom!r} — keys: {list(dom_to_article.keys())}")
             continue
 
         new_status  = row["status"]
