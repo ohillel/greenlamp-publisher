@@ -339,13 +339,24 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
             print("  [gmail_checker/lm] on login page — logging in…")
             _login(page, debug)
             save_session(context, "linksme")
-            # Re-log after login
+            print(f"  [gmail_checker/lm] post-login URL: {page.url}")
+
+            # After login the browser lands on the dashboard, not the report.
+            # Build the report URL by replacing /projects with /report.
+            report_url = re.sub(r'/projects?(/.*)?$', '/report', nav_url.split("?")[0].rstrip("/"))
+            print(f"  [gmail_checker/lm] navigating to report after login: {report_url}")
+            page.goto(report_url, wait_until="load")
+            # Wait for the report table to appear (or fall back after 10 s)
+            try:
+                page.wait_for_selector("table", timeout=10000)
+            except Exception:
+                page.wait_for_timeout(5000)
+            print(f"  [gmail_checker/lm] report URL after navigation: {page.url}")
             try:
                 _body_preview = page.inner_text("body")[:500]
             except Exception:
                 _body_preview = "(error reading body)"
-            print(f"  [gmail_checker/lm] post-login URL: {page.url}")
-            print(f"  [gmail_checker/lm] post-login body: {_body_preview!r}")
+            print(f"  [gmail_checker/lm] report body preview: {_body_preview!r}")
 
         if debug:
             debug_dir = Path(__file__).parent / "debug_screenshots"
