@@ -333,30 +333,46 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
             page.wait_for_timeout(3000)
             print(f"  [gmail_checker/lm] post-redirect URL: {page.url}")
 
-        # Wait up to 30 s for the report content to appear on the page.
-        _content_found = False
-        for _wait_sel in [
-            'text="Resource"',
-            'text="Publication status"',
-            'text="Published"',
-        ]:
-            try:
-                page.wait_for_selector(_wait_sel, timeout=30000)
-                print(f"  [gmail_checker/lm] content signal found: {_wait_sel}")
-                _content_found = True
-                break
-            except Exception:
-                pass
+        # Extract the project ID from the URL (e.g. 2749 from /project/2749/...)
+        _proj_id_m = re.search(r'/project/(\d+)/', nav_url)
+        _proj_id = _proj_id_m.group(1) if _proj_id_m else None
+        print(f"  [gmail_checker/lm] project ID: {_proj_id!r}")
 
-        if not _content_found:
-            print("  [gmail_checker/lm] timed out waiting for report content")
+        # Find and click the Report link whose href contains /project/{id}/
+        _report_clicked = False
+        if _proj_id:
+            for el in page.query_selector_all("a[href]"):
+                try:
+                    href = el.get_attribute("href") or ""
+                    text = el.inner_text().strip().lower()
+                    if f"/project/{_proj_id}/" in href and "report" in text:
+                        print(f"  [gmail_checker/lm] clicking Report link: {href!r}")
+                        el.click()
+                        _report_clicked = True
+                        break
+                except Exception:
+                    pass
 
-        # Log full page text so we can see what actually loaded
+        if not _report_clicked:
+            print("  [gmail_checker/lm] Report link not found — all links on page:")
+            for el in page.query_selector_all("a[href]"):
+                try:
+                    print(f"    {el.inner_text().strip()!r} → {el.get_attribute('href')!r}")
+                except Exception:
+                    pass
+
+        # Wait up to 15 s for the report table to appear
+        try:
+            page.wait_for_selector("table", timeout=15000)
+        except Exception:
+            page.wait_for_timeout(3000)
+
+        # Log page state so we can see what loaded
         try:
             _body_text = page.inner_text("body")
         except Exception:
             _body_text = "(error reading body)"
-        print(f"  [gmail_checker/lm] URL after wait: {page.url}")
+        print(f"  [gmail_checker/lm] URL after Report click: {page.url}")
         print(f"  [gmail_checker/lm] page text (first 1000): {_body_text[:1000]!r}")
 
         if debug:
