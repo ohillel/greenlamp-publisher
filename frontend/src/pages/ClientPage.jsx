@@ -224,10 +224,11 @@ export default function ClientPage() {
   const [saveError, setSaveError] = useState('')
 
   // Or — approve with optional notes
-  const [approving,          setApproving]          = useState(null)   // id being approved
-  const [approveNotesId,     setApproveNotesId]     = useState(null)   // id showing notes input
-  const [approveNotes,       setApproveNotes]       = useState('')
-  const [approveCustomNote,  setApproveCustomNote]  = useState('')
+  const [approving,             setApproving]             = useState(null)   // id being approved
+  const [approveNotesId,        setApproveNotesId]        = useState(null)   // id showing notes input
+  const [approveNotes,          setApproveNotes]          = useState('')
+  const [approveCustomNote,     setApproveCustomNote]     = useState('')
+  const [approveChosenPublisher, setApproveChosenPublisher] = useState('')
 
   // Publisher
   const [markingId,   setMarkingId]   = useState(null)
@@ -271,6 +272,8 @@ export default function ClientPage() {
     if (article) {
       setApproveNotesId(approveId)
       setApproveNotes('')
+      setApproveCustomNote(article.custom_publisher_note ?? '')
+      setApproveChosenPublisher(article.chosen_publisher || article.preferred_publisher || '')
       // Scroll the card into view after a brief tick so it's rendered
       setTimeout(() => {
         document.getElementById(`article-card-${approveId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -505,24 +508,23 @@ export default function ClientPage() {
 
   // ── Or: approve (with optional notes; assignedTo only used for "other" articles) ──
 
-  const approve = async (id, notes, assignedTo = null, customNote = null) => {
+  const approve = async (id, notes, assignedTo = null, customNote = null, chosenPub = null) => {
     setApproving(id)
-    const article    = articles.find(a => a.id === id)
-    const isOther    = article?.preferred_publisher === 'other'
+    const article  = articles.find(a => a.id === id)
+    // "Other" if Or explicitly picked Other in the panel, or article was already Other
+    const isOther  = chosenPub === 'other' || article?.preferred_publisher === 'other'
     const updateData = { status: 'approved', reminder_sent: false }
 
     if (isOther) {
-      // "Other" articles: record who handles it; don't auto-set chosen_publisher
       updateData.chosen_publisher = 'other'
       if (assignedTo) updateData.assigned_to = assignedTo
     } else {
-      // Regular articles: default chosen_publisher to preferred if Or didn't set one
-      if (!article?.chosen_publisher && article?.preferred_publisher) {
-        updateData.chosen_publisher = article.preferred_publisher
-      }
+      // Use Or's panel selection, then article's existing choice, then preferred
+      const effectiveChosen = chosenPub || article?.chosen_publisher || article?.preferred_publisher
+      if (effectiveChosen) updateData.chosen_publisher = effectiveChosen
     }
 
-    if (notes) updateData.publisher_notes = notes
+    if (notes)      updateData.publisher_notes       = notes
     if (customNote) updateData.custom_publisher_note = customNote
     const { error } = await supabase.from('articles').update(updateData).eq('id', id)
     if (!error) {
@@ -538,6 +540,7 @@ export default function ClientPage() {
     setApproveNotesId(null)
     setApproveNotes('')
     setApproveCustomNote('')
+    setApproveChosenPublisher('')
   }
 
   // ── Publisher: return article to Or ─────────────────────────────────────────
@@ -1026,29 +1029,36 @@ export default function ClientPage() {
                   </div>
                 ) : approveNotesId === article.id ? (
                   <div className="approve-notes-area">
+                    <select
+                      value={approveChosenPublisher}
+                      onChange={e => setApproveChosenPublisher(e.target.value)}
+                      style={{ width: '100%', marginBottom: 6, padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                    >
+                      <option value="">— Publisher —</option>
+                      {PUBLISHERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
                     <textarea
                       value={approveNotes}
                       onChange={e => setApproveNotes(e.target.value)}
-                      placeholder={article.preferred_publisher === 'other' ? 'Optional notes…' : 'Optional notes for publisher…'}
+                      placeholder={approveChosenPublisher === 'other' ? 'Optional notes…' : 'Optional notes for publisher…'}
                       autoFocus
                     />
-                    {article.preferred_publisher === 'other' && (
+                    {approveChosenPublisher === 'other' && (
                       <input
                         type="text"
                         value={approveCustomNote}
                         onChange={e => setApproveCustomNote(e.target.value)}
                         placeholder="Publisher destination (e.g. Outreach.io, direct email…)"
-                        defaultValue={article.custom_publisher_note ?? ''}
                         style={{ marginTop: 6, width: '100%', padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
                       />
                     )}
                     <div className="approve-notes-actions">
-                      {article.preferred_publisher === 'other' ? (
+                      {approveChosenPublisher === 'other' ? (
                         <>
                           <button
                             className="btn-approve"
                             style={{ marginLeft: 0 }}
-                            onClick={() => approve(article.id, approveNotes, 'denise', approveCustomNote || null)}
+                            onClick={() => approve(article.id, approveNotes, 'denise', approveCustomNote || null, 'other')}
                             disabled={approving === article.id}
                           >
                             {approving === article.id ? 'Approving…' : '→ Assign to Denise'}
@@ -1056,7 +1066,7 @@ export default function ClientPage() {
                           <button
                             className="btn-send"
                             style={{ marginLeft: 0 }}
-                            onClick={() => approve(article.id, approveNotes, 'or', approveCustomNote || null)}
+                            onClick={() => approve(article.id, approveNotes, 'or', approveCustomNote || null, 'other')}
                             disabled={approving === article.id}
                           >
                             {approving === article.id ? 'Approving…' : '→ Handle myself'}
@@ -1066,13 +1076,13 @@ export default function ClientPage() {
                         <button
                           className="btn-approve"
                           style={{ marginLeft: 0 }}
-                          onClick={() => approve(article.id, approveNotes, null, approveCustomNote || null)}
+                          onClick={() => approve(article.id, approveNotes, null, approveCustomNote || null, approveChosenPublisher || null)}
                           disabled={approving === article.id}
                         >
                           {approving === article.id ? 'Approving…' : 'Confirm Approve'}
                         </button>
                       )}
-                      <button className="btn-ghost" onClick={() => { setApproveNotesId(null); setApproveNotes(''); setApproveCustomNote('') }}>Cancel</button>
+                      <button className="btn-ghost" onClick={() => { setApproveNotesId(null); setApproveNotes(''); setApproveCustomNote(''); setApproveChosenPublisher('') }}>Cancel</button>
                     </div>
                   </div>
                 ) : publishUrlId === article.id ? (
@@ -1109,7 +1119,12 @@ export default function ClientPage() {
                         <button
                           className="btn-approve"
                           style={{ marginLeft: 0 }}
-                          onClick={() => { setApproveNotesId(article.id); setApproveNotes('') }}
+                          onClick={() => {
+                            setApproveNotesId(article.id)
+                            setApproveNotes('')
+                            setApproveCustomNote(article.custom_publisher_note ?? '')
+                            setApproveChosenPublisher(article.chosen_publisher || article.preferred_publisher || '')
+                          }}
                           disabled={approving === article.id}
                         >
                           Approve
