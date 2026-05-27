@@ -409,10 +409,14 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
                 if any(_dom == s or _dom.endswith("." + s) for s in _SKIP_DOMS):
                     continue
 
-                # Text from this domain to the start of the next domain (max 600 chars)
-                _end   = min(_dm.start() + 600,
-                             _doms[_i + 1].start() if _i + 1 < len(_doms) else len(_data))
-                _chunk = _data[_dm.start():_end]
+                # Skip domains that are embedded inside a URL (preceded by "://")
+                _before = _data[max(0, _dm.start() - 3):_dm.start()]
+                if "://" in _before:
+                    continue
+
+                # Fixed 800-char window so the https:// URL that immediately
+                # follows the domain name is always included in the chunk
+                _chunk = _data[_dm.start():_dm.start() + 800]
 
                 _sm = _STATUS_RE.search(_chunk)
                 if not _sm:
