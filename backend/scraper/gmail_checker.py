@@ -380,121 +380,61 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
             debug_dir.mkdir(exist_ok=True)
             (debug_dir / "lm_email_report.txt").write_text(_body_text[:8000])
 
-        # Locate the report table by its known column headers.
-        # Expected headers (case-insensitive): Resource, Purchase date/ID, Type,
-        # Cost, Publication status.
-        _REPORT_HEADERS = {"resource", "purchase", "type", "cost", "publication"}
+        # Parse report data from page text.
+        # The table is visible in inner_text() with columns:
+        #   Resource | Purchase date/ID | Type | Cost | Publication status
+        # Strategy: find each domain-like token after the "Resource" header,
+        # then look forward (up to the next domain) for a status keyword.
+        _DOMAIN_RE  = re.compile(r'\b([a-z0-9][a-z0-9\-]*(?:\.[a-z0-9\-]+)+)\b')
+        _STATUS_RE  = re.compile(r'\b(published|rejected|confirmation\s+request)\b', re.IGNORECASE)
+        _URL_RE     = re.compile(r'https?://\S+')
+        _SKIP_DOMS  = {"links.me", "app.links.me", "google.com", "googleapis.com",
+                       "facebook.com", "twitter.com", "instagram.com"}
 
-        def _find_report_table(pg):
-            for tbl in pg.query_selector_all("table"):
-                header_cells = tbl.query_selector_all("th")
-                if not header_cells:
-                    # Some tables use <td> in the first row as headers
-                    first_row = tbl.query_selector("tr")
-                    header_cells = first_row.query_selector_all("td") if first_row else []
-                header_text = {c.inner_text().strip().lower().split()[0]
-                               for c in header_cells if c.inner_text().strip()}
-                if len(header_text & _REPORT_HEADERS) >= 3:
-                    return tbl
-            return None
-
-        # Wait up to 15 s for the report table to appear
-        report_table = None
-        for _ in range(15):
-            report_table = _find_report_table(page)
-            if report_table:
-                break
-            page.wait_for_timeout(1000)
-
-        if not report_table:
-            print("  [gmail_checker/lm] report table not found on page — logging all table headers for debug:")
-            for i, tbl in enumerate(page.query_selector_all("table")):
-                ths = [c.inner_text().strip() for c in tbl.query_selector_all("th")]
-                print(f"    table[{i}] headers: {ths}")
+        _header_m = re.search(r'\bResource\b', _body_text, re.IGNORECASE)
+        if not _header_m:
+            print("  [gmail_checker/lm] 'Resource' header not found in page text — cannot parse rows")
         else:
-            print("  [gmail_checker/lm] report table found")
+            _data = _body_text[_header_m.start():]
+            _doms = list(_DOMAIN_RE.finditer(_data))
+            print(f"  [gmail_checker/lm] {len(_doms)} domain-like token(s) found after 'Resource' header")
 
-        for page_num in range(1, 6):   # up to 5 pages
-            if not report_table:
-                break
+            for _i, _dm in enumerate(_doms):
+                _raw  = _dm.group(1)
+                _dom  = lm_norm(_raw)
 
-            rows_on_page = 0
-            for tr in report_table.query_selector_all("tr"):
-                cells = tr.query_selector_all("td")
-                if len(cells) < 2:
+                if not _dom or "." not in _dom or len(_dom) < 5:
+                    continue
+                if any(_dom == s or _dom.endswith("." + s) for s in _SKIP_DOMS):
                     continue
 
-                # Column 0: Resource — site / magazine domain
-                site_link = cells[0].query_selector("a")
-                site_raw  = (site_link.inner_text() if site_link else cells[0].inner_text()).strip()
-                site_dom  = lm_norm(site_raw)
-                if not site_dom or "." not in site_dom or len(site_dom) < 4:
+                # Text from this domain to the start of the next domain (max 600 chars)
+                _end   = min(_dm.start() + 600,
+                             _doms[_i + 1].start() if _i + 1 < len(_doms) else len(_data))
+                _chunk = _data[_dm.start():_end]
+
+                _sm = _STATUS_RE.search(_chunk)
+                if not _sm:
                     continue
 
-                rows_on_page += 1
-                # Publication status is the last column; also scan all cells
-                cell_texts = [c.inner_text().strip() for c in cells]
-                matched_status = False
-                for ct in cell_texts:
-                    ct_lower = ct.lower()
+                _status_str = _sm.group(0).lower()
 
-                    if ct_lower.startswith("published") or ct_lower.startswith("confirmation request"):
-                        pub_url = None
-                        for c in cells:
-                            lnk = c.query_selector("a[href]")
-                            if lnk:
-                                href = lnk.get_attribute("href") or ""
-                                if (href.startswith("http") and
-                                        "links.me" not in href and
-                                        "google" not in href):
-                                    pub_url = href
-                                    break
-                        rows_out.append({
-                            "domain":        site_dom,
-                            "status":        "published",
-                            "published_url": pub_url,
-                        })
-                        print(f"  [gmail_checker/lm] {site_dom} → published (url={pub_url})")
-                        matched_status = True
+                # Try to capture a published article URL from the same chunk
+                _pub_url = None
+                for _um in _URL_RE.finditer(_chunk):
+                    _u = _um.group(0).rstrip(".,)")
+                    if "links.me" not in _u and "google" not in _u:
+                        _pub_url = _u
                         break
 
-                    elif ct_lower.startswith("rejected"):
-                        rows_out.append({
-                            "domain":        site_dom,
-                            "status":        "not_published",
-                            "published_url": None,
-                        })
-                        print(f"  [gmail_checker/lm] {site_dom} → not_published")
-                        matched_status = True
-                        break
+                if "published" in _status_str or "confirmation" in _status_str:
+                    rows_out.append({"domain": _dom, "status": "published", "published_url": _pub_url})
+                    print(f"  [gmail_checker/lm] {_dom} → published (url={_pub_url})")
+                elif "rejected" in _status_str:
+                    rows_out.append({"domain": _dom, "status": "not_published", "published_url": None})
+                    print(f"  [gmail_checker/lm] {_dom} → not_published")
 
-                if not matched_status:
-                    print(f"  [gmail_checker/lm] row domain={site_dom!r} — no status match, cell texts: {cell_texts}")
-
-            print(f"  [gmail_checker/lm] page {page_num}: {rows_on_page} data row(s) scanned, {len(rows_out)} settled so far")
-
-            # Pagination
-            next_btn = None
-            for sel in [
-                'a[rel="next"]',
-                'li.next:not(.disabled) a',
-                'a:has-text("Next")',
-                'a:has-text("›")',
-                'a:has-text("»")',
-            ]:
-                try:
-                    el = page.query_selector(sel)
-                    if el and el.is_visible():
-                        next_btn = el
-                        break
-                except Exception:
-                    pass
-
-            if not next_btn:
-                break
-            next_btn.click()
-            page.wait_for_timeout(2000)
-            report_table = _find_report_table(page)  # re-locate after navigation
+        print(f"  [gmail_checker/lm] text parse complete: {len(rows_out)} settled row(s)")
 
         browser.close()
 
