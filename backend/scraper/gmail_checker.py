@@ -385,7 +385,7 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
         #   Resource | Purchase date/ID | Type | Cost | Publication status
         # Strategy: find each domain-like token after the "Resource" header,
         # then look forward (up to the next domain) for a status keyword.
-        _DOMAIN_RE  = re.compile(r'\b([a-z0-9][a-z0-9\-]*(?:\.[a-z0-9\-]+)+)\b')
+        _DOMAIN_RE  = re.compile(r'\b([a-z][a-z0-9\-]*\.[a-z]{2,6}(?:\.[a-z]{2,6})?)\b')
         _STATUS_RE  = re.compile(r'\b(published|rejected|confirmation\s+request)\b', re.IGNORECASE)
         _URL_RE     = re.compile(r'https?://\S+')
         _SKIP_DOMS  = {"links.me", "app.links.me", "google.com", "googleapis.com",
