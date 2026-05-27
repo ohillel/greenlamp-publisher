@@ -363,14 +363,51 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
                 page.inner_text("body")[:8000]
             )
 
+        # Locate the report table by its known column headers.
+        # Expected headers (case-insensitive): Resource, Purchase date/ID, Type,
+        # Cost, Publication status.
+        _REPORT_HEADERS = {"resource", "purchase", "type", "cost", "publication"}
+
+        def _find_report_table(pg):
+            for tbl in pg.query_selector_all("table"):
+                header_cells = tbl.query_selector_all("th")
+                if not header_cells:
+                    # Some tables use <td> in the first row as headers
+                    first_row = tbl.query_selector("tr")
+                    header_cells = first_row.query_selector_all("td") if first_row else []
+                header_text = {c.inner_text().strip().lower().split()[0]
+                               for c in header_cells if c.inner_text().strip()}
+                if len(header_text & _REPORT_HEADERS) >= 3:
+                    return tbl
+            return None
+
+        # Wait up to 15 s for the report table to appear
+        report_table = None
+        for _ in range(15):
+            report_table = _find_report_table(page)
+            if report_table:
+                break
+            page.wait_for_timeout(1000)
+
+        if not report_table:
+            print("  [gmail_checker/lm] report table not found on page — logging all table headers for debug:")
+            for i, tbl in enumerate(page.query_selector_all("table")):
+                ths = [c.inner_text().strip() for c in tbl.query_selector_all("th")]
+                print(f"    table[{i}] headers: {ths}")
+        else:
+            print("  [gmail_checker/lm] report table found")
+
         for page_num in range(1, 6):   # up to 5 pages
+            if not report_table:
+                break
+
             rows_on_page = 0
-            for tr in page.query_selector_all("tr"):
+            for tr in report_table.query_selector_all("tr"):
                 cells = tr.query_selector_all("td")
                 if len(cells) < 2:
                     continue
 
-                # Column 0: site / magazine domain
+                # Column 0: Resource — site / magazine domain
                 site_link = cells[0].query_selector("a")
                 site_raw  = (site_link.inner_text() if site_link else cells[0].inner_text()).strip()
                 site_dom  = lm_norm(site_raw)
@@ -378,14 +415,13 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
                     continue
 
                 rows_on_page += 1
-                # Scan remaining cells for a recognised status string
-                cell_texts = [c.inner_text().strip() for c in cells[1:]]
+                # Publication status is the last column; also scan all cells
+                cell_texts = [c.inner_text().strip() for c in cells]
                 matched_status = False
-                for idx, ct in enumerate(cell_texts):
+                for ct in cell_texts:
                     ct_lower = ct.lower()
 
                     if ct_lower.startswith("published") or ct_lower.startswith("confirmation request"):
-                        # Try to find the published article URL in this row
                         pub_url = None
                         for c in cells:
                             lnk = c.query_selector("a[href]")
@@ -441,6 +477,7 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
                 break
             next_btn.click()
             page.wait_for_timeout(2000)
+            report_table = _find_report_table(page)  # re-locate after navigation
 
         browser.close()
 
