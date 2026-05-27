@@ -345,16 +345,47 @@ def _scrape_linksme_report(nav_url: str, debug: bool) -> list[dict]:
             # to the correct report page since the session is established.
             print(f"  [gmail_checker/lm] re-navigating to email link: {nav_url}")
             page.goto(nav_url, wait_until="load")
-            try:
-                page.wait_for_selector("table", timeout=10000)
-            except Exception:
-                page.wait_for_timeout(5000)
+            page.wait_for_timeout(3000)
             print(f"  [gmail_checker/lm] post-redirect URL: {page.url}")
-            try:
-                _body_preview = page.inner_text("body")[:500]
-            except Exception:
-                _body_preview = "(error reading body)"
-            print(f"  [gmail_checker/lm] post-redirect body: {_body_preview!r}")
+
+        # Click the "Report" link in the sidebar to reveal the report table.
+        def _click_report_tab(pg):
+            for sel in [
+                'a:has-text("Report")',
+                'nav a:has-text("Report")',
+                'aside a:has-text("Report")',
+                'li a:has-text("Report")',
+                '[class*="sidebar"] a:has-text("Report")',
+                '[class*="menu"] a:has-text("Report")',
+            ]:
+                try:
+                    el = pg.query_selector(sel)
+                    if el and el.is_visible():
+                        print(f"  [gmail_checker/lm] clicking Report tab ({sel})")
+                        el.click()
+                        return True
+                except Exception:
+                    pass
+            print("  [gmail_checker/lm] Report tab not found — listing sidebar links for debug:")
+            for el in pg.query_selector_all('nav a, aside a, [class*="sidebar"] a, [class*="menu"] a'):
+                try:
+                    print(f"    link: {el.inner_text().strip()!r} href={el.get_attribute('href')!r}")
+                except Exception:
+                    pass
+            return False
+
+        _click_report_tab(page)
+        # Wait for the report table to appear after the tab click
+        try:
+            page.wait_for_selector("table", timeout=10000)
+        except Exception:
+            page.wait_for_timeout(3000)
+        print(f"  [gmail_checker/lm] URL after Report tab click: {page.url}")
+        try:
+            _body_preview = page.inner_text("body")[:500]
+        except Exception:
+            _body_preview = "(error reading body)"
+        print(f"  [gmail_checker/lm] body after Report tab click: {_body_preview!r}")
 
         if debug:
             debug_dir = Path(__file__).parent / "debug_screenshots"
