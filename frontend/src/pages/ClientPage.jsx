@@ -64,7 +64,7 @@ function DeniseArticleCard({
           }
         </span>
         {!isEditing && article.created_at && (
-          <span className="card-date">{fmtDate(article.created_at)}</span>
+          <span className="card-date"><span style={{ opacity: 0.6, fontSize: 11 }}>Added:</span> {fmtDate(article.created_at)}</span>
         )}
         <StatusBadge status={article.status} />
       </div>
@@ -143,7 +143,7 @@ function DeniseArticleCard({
                     {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
                   </a>
                   {article.published_at && (
-                    <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}>{fmtDate(article.published_at)}</span>
+                    <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}><span style={{ opacity: 0.7 }}>Published:</span> {fmtDate(article.published_at)}</span>
                   )}
                 </span>
               </div>
@@ -929,7 +929,7 @@ export default function ClientPage() {
                   }
                 </span>
                 {!isEditing && article.created_at && (
-                  <span className="card-date">{fmtDate(article.created_at)}</span>
+                  <span className="card-date"><span style={{ opacity: 0.6, fontSize: 11 }}>Added:</span> {fmtDate(article.created_at)}</span>
                 )}
                 <StatusBadge status={article.status} />
               </div>
@@ -1034,7 +1034,7 @@ export default function ClientPage() {
                         {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
                       </a>
                       {article.published_at && (
-                        <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}>{fmtDate(article.published_at)}</span>
+                        <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}><span style={{ opacity: 0.7 }}>Published:</span> {fmtDate(article.published_at)}</span>
                       )}
                     </span>
                   </div>
@@ -1223,7 +1223,7 @@ export default function ClientPage() {
               <div className="card-header">
                 <span className="card-magazine">{article.magazine ?? '—'}</span>
                 {article.created_at && (
-                  <span className="card-date">{fmtDate(article.created_at)}</span>
+                  <span className="card-date"><span style={{ opacity: 0.6, fontSize: 11 }}>Added:</span> {fmtDate(article.created_at)}</span>
                 )}
                 <StatusBadge status={article.status} />
               </div>
@@ -1280,7 +1280,7 @@ export default function ClientPage() {
                         {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
                       </a>
                       {article.published_at && (
-                        <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}>{fmtDate(article.published_at)}</span>
+                        <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}><span style={{ opacity: 0.7 }}>Published:</span> {fmtDate(article.published_at)}</span>
                       )}
                     </span>
                   </div>
