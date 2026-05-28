@@ -463,7 +463,7 @@ export default function ClientsPage() {
               <div className="empty-state"><p>No articles found for this magazine.</p></div>
             ) : (
               <>
-                {magMonths.length > 1 && (
+                {magMonths.length > 0 && (
                   <div style={{ marginBottom: 10 }}>
                     <select
                       value={magMonthFilter}
