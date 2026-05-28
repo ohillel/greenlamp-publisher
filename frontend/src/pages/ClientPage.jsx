@@ -77,25 +77,37 @@ function DeniseArticleCard({
             </div>
             <div className="denise-edit-field">
               <label>Preferred Publisher</label>
-              <select name="preferred_publisher" value={editData.preferred_publisher} onChange={onEditChange}>
-                <option value="">— Select —</option>
-                <option value="presswhizz">PressWhizz</option>
-                <option value="linksme">Links.me</option>
-                <option value="other">Other</option>
-              </select>
+              {editData.preferred_publisher === 'other' ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    name="custom_publisher_note"
+                    value={editData.custom_publisher_note}
+                    onChange={onEditChange}
+                    placeholder="e.g. Outreach.io, direct email to editor…"
+                    autoFocus
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onEditChange({ target: { name: 'preferred_publisher',   value: '' } })
+                      onEditChange({ target: { name: 'custom_publisher_note', value: '' } })
+                    }}
+                    style={{ whiteSpace: 'nowrap', fontSize: 12, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
+                  >
+                    ← Back
+                  </button>
+                </div>
+              ) : (
+                <select name="preferred_publisher" value={editData.preferred_publisher} onChange={onEditChange}>
+                  <option value="">— Select —</option>
+                  <option value="presswhizz">PressWhizz</option>
+                  <option value="linksme">Links.me</option>
+                  <option value="other">Other</option>
+                </select>
+              )}
             </div>
-            {editData.preferred_publisher === 'other' && (
-              <div className="denise-edit-field">
-                <label>Publisher destination</label>
-                <input
-                  type="text"
-                  name="custom_publisher_note"
-                  value={editData.custom_publisher_note}
-                  onChange={onEditChange}
-                  placeholder="e.g. Outreach.io, direct email to editor…"
-                />
-              </div>
-            )}
           </>
         ) : (
           <>
@@ -827,25 +839,34 @@ export default function ClientPage() {
               </div>
               <div className="field">
                 <label>Preferred Publisher</label>
-                <select name="preferred_publisher" value={form.preferred_publisher} onChange={handleFormChange} required>
-                  <option value="">— Select —</option>
-                  <option value="presswhizz">PressWhizz</option>
-                  <option value="linksme">Links.me</option>
-                  <option value="other">Other</option>
-                </select>
+                {form.preferred_publisher === 'other' ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      name="custom_publisher_note"
+                      value={form.custom_publisher_note}
+                      onChange={handleFormChange}
+                      placeholder="e.g. Outreach.io, direct email to editor…"
+                      autoFocus
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, preferred_publisher: '', custom_publisher_note: '' }))}
+                      style={{ whiteSpace: 'nowrap', fontSize: 12, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
+                    >
+                      ← Back
+                    </button>
+                  </div>
+                ) : (
+                  <select name="preferred_publisher" value={form.preferred_publisher} onChange={handleFormChange} required>
+                    <option value="">— Select —</option>
+                    <option value="presswhizz">PressWhizz</option>
+                    <option value="linksme">Links.me</option>
+                    <option value="other">Other</option>
+                  </select>
+                )}
               </div>
-              {form.preferred_publisher === 'other' && (
-                <div className="field">
-                  <label>Publisher destination</label>
-                  <input
-                    type="text"
-                    name="custom_publisher_note"
-                    value={form.custom_publisher_note}
-                    onChange={handleFormChange}
-                    placeholder="e.g. Outreach.io, direct email to editor…"
-                  />
-                </div>
-              )}
             </div>
             {submitError && <p className="form-error">{submitError}</p>}
             <button type="submit" className="btn-primary submit-btn" disabled={submitting}>
@@ -1029,29 +1050,39 @@ export default function ClientPage() {
                   </div>
                 ) : approveNotesId === article.id ? (
                   <div className="approve-notes-area">
-                    <select
-                      value={approveChosenPublisher}
-                      onChange={e => setApproveChosenPublisher(e.target.value)}
-                      style={{ width: '100%', marginBottom: 6, padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
-                    >
-                      <option value="">— Publisher —</option>
-                      {PUBLISHERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                    </select>
+                    {approveChosenPublisher === 'other' ? (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                        <input
+                          type="text"
+                          value={approveCustomNote}
+                          onChange={e => setApproveCustomNote(e.target.value)}
+                          placeholder="e.g. Outreach.io, direct email to editor…"
+                          autoFocus
+                          style={{ flex: 1, padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => { setApproveChosenPublisher(''); setApproveCustomNote('') }}
+                          style={{ whiteSpace: 'nowrap', fontSize: 12, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
+                        >
+                          ← Back
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={approveChosenPublisher}
+                        onChange={e => setApproveChosenPublisher(e.target.value)}
+                        style={{ width: '100%', marginBottom: 6, padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+                      >
+                        <option value="">— Publisher —</option>
+                        {PUBLISHERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                      </select>
+                    )}
                     <textarea
                       value={approveNotes}
                       onChange={e => setApproveNotes(e.target.value)}
-                      placeholder={approveChosenPublisher === 'other' ? 'Optional notes…' : 'Optional notes for publisher…'}
-                      autoFocus
+                      placeholder="Optional notes for publisher…"
                     />
-                    {approveChosenPublisher === 'other' && (
-                      <input
-                        type="text"
-                        value={approveCustomNote}
-                        onChange={e => setApproveCustomNote(e.target.value)}
-                        placeholder="Publisher destination (e.g. Outreach.io, direct email…)"
-                        style={{ marginTop: 6, width: '100%', padding: '6px 8px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
-                      />
-                    )}
                     <div className="approve-notes-actions">
                       {approveChosenPublisher === 'other' ? (
                         <>
