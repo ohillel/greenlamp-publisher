@@ -125,8 +125,15 @@ def send_retainer_email(
         print("[email/retainer] GOOGLE_TOKEN_JSON not set — skipping")
         return
 
+    # Normalise: ensure full URL with trailing slash
+    mag = magazine_url.strip()
+    if not mag.startswith("http"):
+        mag = "https://www." + mag
+    if not mag.endswith("/"):
+        mag = mag + "/"
+
     to_addr = "office@greenlamp.co"
-    subject = f"Please add to retainer — {client_name} | {magazine_url}"
+    subject = f"Please add to retainer — {client_name} | {mag}"
 
     doc_line_html  = f'<p><strong>Google Doc:</strong> <a href="{google_doc_url}">{google_doc_url}</a></p>' if google_doc_url else ""
     doc_line_plain = f"\nGoogle Doc: {google_doc_url}" if google_doc_url else ""
@@ -135,14 +142,14 @@ def send_retainer_email(
 <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a1a1a">
   <p style="font-size:16px;margin:0 0 12px">A new article has been published and should be added to the retainer.</p>
   <p><strong>Client:</strong> {client_name}</p>
-  <p><strong>Magazine:</strong> <a href="{magazine_url}">{magazine_url}</a></p>
+  <p><strong>Magazine:</strong> <a href="{mag}">{mag}</a></p>
   {doc_line_html}
 </div>"""
 
     plain = (
         f"A new article has been published and should be added to the retainer.\n\n"
         f"Client:  {client_name}\n"
-        f"Magazine: {magazine_url}"
+        f"Magazine: {mag}"
         f"{doc_line_plain}"
     )
 
