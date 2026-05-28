@@ -329,16 +329,15 @@ async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
         # For 'published' events, look up the published URL and client Google Doc
         # and include them as extra links in the email.
         extra_links: list[dict] = []
-        _retainer_doc_url: str | None = None
+        _client_doc_url: str | None = None
         if req.event == "published" and req.article_id:
             try:
                 art_res = sb.from_("articles") \
-                    .select("published_url, google_doc_url, client_id") \
+                    .select("published_url, client_id") \
                     .eq("id", req.article_id) \
                     .single() \
                     .execute()
                 if art_res.data:
-                    _retainer_doc_url = art_res.data.get("google_doc_url")
                     if art_res.data.get("published_url"):
                         extra_links.append({
                             "url":   art_res.data["published_url"],
@@ -350,11 +349,13 @@ async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
                             .eq("id", art_res.data["client_id"]) \
                             .single() \
                             .execute()
-                        if cli_res.data and cli_res.data.get("google_doc_url"):
-                            extra_links.append({
-                                "url":   cli_res.data["google_doc_url"],
-                                "label": "Client Google Doc",
-                            })
+                        if cli_res.data:
+                            _client_doc_url = cli_res.data.get("google_doc_url")
+                            if _client_doc_url:
+                                extra_links.append({
+                                    "url":   _client_doc_url,
+                                    "label": "Client Google Doc",
+                                })
             except Exception as link_err:
                 print(f"[notify] could not fetch extra links for published event: {link_err}")
 
@@ -367,7 +368,7 @@ async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
                 send_retainer_email,
                 req.client_name,
                 req.magazine,
-                _retainer_doc_url,
+                _client_doc_url,
             )
 
         # When an article is submitted, kick off price fetching in the background
