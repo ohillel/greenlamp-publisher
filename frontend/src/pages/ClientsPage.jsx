@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabase'
@@ -21,6 +21,100 @@ const normalizeMag = raw => {
   s = s.replace(/^www\./, '')
   s = s.replace(/\/$/, '')
   return s
+}
+
+// ── SearchableSelect ─────────────────────────────────────────────────────────
+// A dropdown with an inline search input. options: [{value, label}]
+// allLabel is the label for the "show all" option (value='all').
+
+function SearchableSelect({ value, onChange, options, allLabel = 'All' }) {
+  const [open,   setOpen]   = useState(false)
+  const [query,  setQuery]  = useState('')
+  const ref      = useRef(null)
+  const inputRef = useRef(null)
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options
+  }, [options, query])
+
+  const current = value === 'all' ? allLabel : (options.find(o => o.value === value)?.label ?? allLabel)
+
+  useEffect(() => {
+    if (!open) { setQuery(''); return }
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const select = val => { onChange(val); setOpen(false) }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{
+          height: 32, padding: '0 28px 0 10px', border: '1px solid #d1d5db',
+          borderRadius: 6, background: '#ffffff', color: '#111827', fontSize: 13,
+          cursor: 'pointer', whiteSpace: 'nowrap', position: 'relative',
+        }}
+      >
+        {current}
+        <span style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10, opacity: 0.5 }}>▼</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, zIndex: 200, marginTop: 4,
+          background: '#fff', border: '1px solid #d1d5db', borderRadius: 8,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 180, maxWidth: 260,
+        }}>
+          <div style={{ padding: '6px 8px', borderBottom: '1px solid #f0f0f0' }}>
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search…"
+              style={{ width: '100%', padding: '4px 6px', border: '1px solid #e5e7eb', borderRadius: 4, fontSize: 12, boxSizing: 'border-box' }}
+            />
+          </div>
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {!query && (
+              <div
+                onClick={() => select('all')}
+                style={{ padding: '7px 12px', fontSize: 13, cursor: 'pointer', fontStyle: 'italic', color: '#6b7280', background: value === 'all' ? '#f0fdf4' : 'transparent' }}
+              >
+                {allLabel}
+              </div>
+            )}
+            {filtered.length === 0 ? (
+              <div style={{ padding: '7px 12px', fontSize: 12, color: '#9ca3af' }}>No matches</div>
+            ) : filtered.map(o => (
+              <div
+                key={o.value}
+                onClick={() => select(o.value)}
+                style={{
+                  padding: '7px 12px', fontSize: 13, cursor: 'pointer',
+                  background: o.value === value ? '#f0fdf4' : 'transparent',
+                  fontWeight: o.value === value ? 600 : 400,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = o.value === value ? '#f0fdf4' : '#f9fafb' }}
+                onMouseLeave={e => { e.currentTarget.style.background = o.value === value ? '#f0fdf4' : 'transparent' }}
+              >
+                {o.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Shared: all-clients folder grid (with optional pending highlights) ────────
@@ -481,26 +575,18 @@ export default function ClientsPage() {
               <>
                 {(magMonths.length > 0 || magClients.length > 0) && (
                   <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-                    <select
+                    <SearchableSelect
                       value={magMonthFilter}
-                      onChange={e => setMagMonthFilter(e.target.value)}
-                      style={{ height: 32, padding: '0 10px', border: '1px solid #d1d5db', borderRadius: 6, background: '#ffffff', color: '#111827', fontSize: 13, cursor: 'pointer' }}
-                    >
-                      <option value="all">All months</option>
-                      {magMonths.map(({ key, label }) => (
-                        <option key={key} value={key}>{label}</option>
-                      ))}
-                    </select>
-                    <select
+                      onChange={setMagMonthFilter}
+                      options={magMonths.map(({ key, label }) => ({ value: key, label }))}
+                      allLabel="All months"
+                    />
+                    <SearchableSelect
                       value={magClientFilter}
-                      onChange={e => setMagClientFilter(e.target.value)}
-                      style={{ height: 32, padding: '0 10px', border: '1px solid #d1d5db', borderRadius: 6, background: '#ffffff', color: '#111827', fontSize: 13, cursor: 'pointer' }}
-                    >
-                      <option value="all">All clients</option>
-                      {magClients.map(({ id, name }) => (
-                        <option key={id} value={id}>{name}</option>
-                      ))}
-                    </select>
+                      onChange={setMagClientFilter}
+                      options={magClients.map(({ id, name }) => ({ value: id, label: name }))}
+                      allLabel="All clients"
+                    />
                   </div>
                 )}
                 <table className="pending-articles-table" style={{ width: '100%' }}>
