@@ -322,7 +322,7 @@ export default function ClientsPage() {
         .ilike('magazine', `%${term}%`)
         .order('created_at', { ascending: false })
 
-      const matched = (data ?? []).filter(a => normalizeMag(a.magazine) === term)
+      const matched = (data ?? []).filter(a => normalizeMag(a.magazine).includes(term))
       setMagResults(matched)
       setMagSearching(false)
     }, 350)
