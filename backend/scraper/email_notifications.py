@@ -110,3 +110,52 @@ def send_email_to_roles(
             print(f"[email] sent to {to_addr!r}: {subject!r}")
     except Exception as e:
         print(f"[email] error sending to {to_emails!r}: {e}")
+
+
+def send_retainer_email(
+    client_name: str,
+    magazine_url: str,
+    google_doc_url: str | None,
+) -> None:
+    """
+    Notify office@greenlamp.co to add this publication to the client retainer.
+    Called when an article is marked as published.
+    """
+    if not os.environ.get("GOOGLE_TOKEN_JSON"):
+        print("[email/retainer] GOOGLE_TOKEN_JSON not set — skipping")
+        return
+
+    to_addr = "office@greenlamp.co"
+    subject = f"Please add to retainer — {client_name} | {magazine_url}"
+
+    doc_line_html  = f'<p><strong>Google Doc:</strong> <a href="{google_doc_url}">{google_doc_url}</a></p>' if google_doc_url else ""
+    doc_line_plain = f"\nGoogle Doc: {google_doc_url}" if google_doc_url else ""
+
+    html = f"""\
+<div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#1a1a1a">
+  <p style="font-size:16px;margin:0 0 12px">A new article has been published and should be added to the retainer.</p>
+  <p><strong>Client:</strong> {client_name}</p>
+  <p><strong>Magazine:</strong> <a href="{magazine_url}">{magazine_url}</a></p>
+  {doc_line_html}
+</div>"""
+
+    plain = (
+        f"A new article has been published and should be added to the retainer.\n\n"
+        f"Client:  {client_name}\n"
+        f"Magazine: {magazine_url}"
+        f"{doc_line_plain}"
+    )
+
+    try:
+        service = _gmail_service()
+        msg = MIMEMultipart("alternative")
+        msg["From"]    = SENDER
+        msg["To"]      = to_addr
+        msg["Subject"] = subject
+        msg.attach(MIMEText(plain, "plain", "utf-8"))
+        msg.attach(MIMEText(html,  "html",  "utf-8"))
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        print(f"[email/retainer] sent to {to_addr!r}: {subject!r}")
+    except Exception as e:
+        print(f"[email/retainer] error: {e}")
