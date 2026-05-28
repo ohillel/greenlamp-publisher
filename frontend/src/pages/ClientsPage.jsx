@@ -208,11 +208,14 @@ export default function ClientsPage() {
   const [pendingClientIds, setPendingClientIds] = useState(new Set())
 
   // Magazine search
-  const [magSearch,      setMagSearch]      = useState('')
-  const [magResults,     setMagResults]     = useState([])
-  const [magSearching,   setMagSearching]   = useState(false)
+  const [magInput,         setMagInput]         = useState('')        // what user is typing
+  const [magSelected,      setMagSelected]      = useState('')        // confirmed selection
+  const [magSuggestions,   setMagSuggestions]   = useState([])        // autocomplete list
+  const [magResults,       setMagResults]       = useState([])
+  const [magSearching,     setMagSearching]     = useState(false)
   const [magMonthFilter,   setMagMonthFilter]   = useState('all')
   const [magClientFilter,  setMagClientFilter]  = useState('all')
+  const magInputRef = useRef(null)
 
   // Or — submitted articles + approved "other" assigned to Or
   const [pendingArticles,   setPendingArticles]   = useState([])
@@ -305,17 +308,46 @@ export default function ClientsPage() {
     return () => { supabase.removeChannel(channel) }
   }, [role, refreshOrArticles, refreshPublisherArticles, refreshDeniseArticles])
 
-  // ── Magazine search ──────────────────────────────────────────────────────────
+  // ── Magazine search: suggestions while typing ───────────────────────────────
 
   useEffect(() => {
-    const term = normalizeMag(magSearch)
+    const term = normalizeMag(magInput)
+    if (!term || magSelected) { setMagSuggestions([]); return }
+
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('articles')
+        .select('magazine')
+        .ilike('magazine', `%${term}%`)
+        .limit(200)
+
+      // Deduplicate by normalized domain, keep display form
+      const seen = new Set()
+      const suggestions = []
+      for (const row of data ?? []) {
+        const norm = normalizeMag(row.magazine)
+        if (norm && norm.includes(term) && !seen.has(norm)) {
+          seen.add(norm)
+          suggestions.push(norm)
+        }
+      }
+      suggestions.sort()
+      setMagSuggestions(suggestions)
+    }, 200)
+
+    return () => clearTimeout(timer)
+  }, [magInput, magSelected])
+
+  // ── Magazine search: fetch results after selection ───────────────────────────
+
+  useEffect(() => {
+    const term = normalizeMag(magSelected)
     setMagMonthFilter('all')
     setMagClientFilter('all')
     if (!term) { setMagResults([]); return }
 
-    const timer = setTimeout(async () => {
+    ;(async () => {
       setMagSearching(true)
-      // Fetch candidates with a broad ilike, then normalize client-side
       const { data } = await supabase
         .from('articles')
         .select('id, client_id, magazine, created_at, published_at, clients(name)')
@@ -325,10 +357,8 @@ export default function ClientsPage() {
       const matched = (data ?? []).filter(a => normalizeMag(a.magazine).includes(term))
       setMagResults(matched)
       setMagSearching(false)
-    }, 350)
-
-    return () => clearTimeout(timer)
-  }, [magSearch])
+    })()
+  }, [magSelected])
 
   // ── Close popup on outside click ─────────────────────────────────────────────
 
@@ -512,14 +542,49 @@ export default function ClientsPage() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
-              <input
-                className="clients-search"
-                type="search"
-                placeholder="Search magazine…"
-                value={magSearch}
-                onChange={e => setMagSearch(e.target.value)}
-                style={{ marginLeft: 8 }}
-              />
+              <div style={{ position: 'relative', marginLeft: 8 }}>
+                <input
+                  ref={magInputRef}
+                  className="clients-search"
+                  type="search"
+                  placeholder="Search magazine…"
+                  value={magInput}
+                  onChange={e => {
+                    setMagInput(e.target.value)
+                    if (magSelected) setMagSelected('')  // clear selection when typing again
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') { setMagInput(''); setMagSelected(''); setMagSuggestions([]) }
+                    if (e.key === 'Enter' && magSuggestions.length === 1) {
+                      setMagInput(magSuggestions[0]); setMagSelected(magSuggestions[0]); setMagSuggestions([])
+                    }
+                  }}
+                  autoComplete="off"
+                />
+                {magSuggestions.length > 0 && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, zIndex: 300, marginTop: 4,
+                    background: '#fff', border: '1px solid #d1d5db', borderRadius: 8,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 240, maxWidth: 360,
+                    maxHeight: 240, overflowY: 'auto',
+                  }}>
+                    {magSuggestions.map(s => (
+                      <div
+                        key={s}
+                        onMouseDown={e => {
+                          e.preventDefault()  // prevent input blur
+                          setMagInput(s); setMagSelected(s); setMagSuggestions([])
+                        }}
+                        style={{ padding: '8px 12px', fontSize: 13, cursor: 'pointer', color: '#111827' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#f0fdf4' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                      >
+                        {s}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -528,7 +593,7 @@ export default function ClientsPage() {
       {loading && <div className="loading-inline">Loading…</div>}
 
       {/* ── Magazine search results ── */}
-      {!loading && magSearch.trim() && (() => {
+      {!loading && magSelected && (() => {
         // Derive sorted month list from results
         const magMonths = (() => {
           const seen = new Set()
@@ -623,7 +688,7 @@ export default function ClientsPage() {
       })()}
 
       {/* ── Role-based layouts (hidden while magazine search is active) ── */}
-      {!loading && !magSearch.trim() && <>
+      {!loading && !magSelected && <>
 
       {/* ── Or layout ── */}
       {role === 'or' && pendingArticles.length === 0 && (
