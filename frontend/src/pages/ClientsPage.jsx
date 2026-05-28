@@ -117,7 +117,8 @@ export default function ClientsPage() {
   const [magSearch,      setMagSearch]      = useState('')
   const [magResults,     setMagResults]     = useState([])
   const [magSearching,   setMagSearching]   = useState(false)
-  const [magMonthFilter, setMagMonthFilter] = useState('all')
+  const [magMonthFilter,   setMagMonthFilter]   = useState('all')
+  const [magClientFilter,  setMagClientFilter]  = useState('all')
 
   // Or — submitted articles + approved "other" assigned to Or
   const [pendingArticles,   setPendingArticles]   = useState([])
@@ -215,6 +216,7 @@ export default function ClientsPage() {
   useEffect(() => {
     const term = normalizeMag(magSearch)
     setMagMonthFilter('all')
+    setMagClientFilter('all')
     if (!term) { setMagResults([]); return }
 
     const timer = setTimeout(async () => {
@@ -449,11 +451,25 @@ export default function ClientsPage() {
           return months.sort((a, b) => b.key.localeCompare(a.key))
         })()
 
-        const visibleMagResults = magMonthFilter === 'all'
-          ? magResults
-          : magResults.filter(a =>
-              a.created_at && new Date(a.created_at).toISOString().slice(0, 7) === magMonthFilter
-            )
+        // Derive sorted client list from results
+        const magClients = (() => {
+          const seen = new Map()
+          for (const a of magResults) {
+            const id   = a.client_id
+            const name = a.clients?.name ?? '—'
+            if (!seen.has(id)) seen.set(id, name)
+          }
+          return [...seen.entries()]
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        })()
+
+        const visibleMagResults = magResults.filter(a => {
+          const monthOk = magMonthFilter === 'all' ||
+            (a.created_at && new Date(a.created_at).toISOString().slice(0, 7) === magMonthFilter)
+          const clientOk = magClientFilter === 'all' || a.client_id === magClientFilter
+          return monthOk && clientOk
+        })
 
         return (
           <div style={{ marginBottom: 24 }}>
@@ -463,8 +479,8 @@ export default function ClientsPage() {
               <div className="empty-state"><p>No articles found for this magazine.</p></div>
             ) : (
               <>
-                {magMonths.length > 0 && (
-                  <div style={{ marginBottom: 10 }}>
+                {(magMonths.length > 0 || magClients.length > 0) && (
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                     <select
                       value={magMonthFilter}
                       onChange={e => setMagMonthFilter(e.target.value)}
@@ -475,11 +491,22 @@ export default function ClientsPage() {
                         <option key={key} value={key}>{label}</option>
                       ))}
                     </select>
+                    <select
+                      value={magClientFilter}
+                      onChange={e => setMagClientFilter(e.target.value)}
+                      style={{ height: 32, padding: '0 10px', border: '1px solid #d1d5db', borderRadius: 6, background: '#ffffff', color: '#111827', fontSize: 13, cursor: 'pointer' }}
+                    >
+                      <option value="all">All clients</option>
+                      {magClients.map(({ id, name }) => (
+                        <option key={id} value={id}>{name}</option>
+                      ))}
+                    </select>
                   </div>
                 )}
                 <table className="pending-articles-table" style={{ width: '100%' }}>
                   <thead>
                     <tr>
+                      <th>#</th>
                       <th>Client</th>
                       <th>Added date</th>
                       <th>Published date</th>
@@ -487,14 +514,15 @@ export default function ClientsPage() {
                   </thead>
                   <tbody>
                     {visibleMagResults.length === 0 ? (
-                      <tr><td colSpan={3} style={{ textAlign: 'center', color: '#6b7280', padding: 16 }}>No articles in this month.</td></tr>
-                    ) : visibleMagResults.map(article => (
+                      <tr><td colSpan={4} style={{ textAlign: 'center', color: '#6b7280', padding: 16 }}>No articles match the selected filters.</td></tr>
+                    ) : visibleMagResults.map((article, i) => (
                       <tr
                         key={article.id}
                         className="pending-article-row"
                         style={{ cursor: 'pointer' }}
                         onClick={() => navigate(`/clients/${article.client_id}?article=${article.id}`)}
                       >
+                        <td className="col-num">{i + 1}</td>
                         <td className="col-client">{article.clients?.name ?? '—'}</td>
                         <td className="col-date">{fmtDate(article.created_at)}</td>
                         <td className="col-date">{article.published_at ? fmtDate(article.published_at) : '—'}</td>
