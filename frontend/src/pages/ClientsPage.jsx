@@ -12,7 +12,15 @@ const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 
 const fmtDate = dateStr => {
   if (!dateStr) return '—'
-  return new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  return new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+const normalizeMag = raw => {
+  let s = (raw ?? '').trim().toLowerCase()
+  s = s.replace(/^https?:\/\//, '')
+  s = s.replace(/^www\./, '')
+  s = s.replace(/\/$/, '')
+  return s
 }
 
 // ── Shared: all-clients folder grid (with optional pending highlights) ────────
@@ -105,6 +113,11 @@ export default function ClientsPage() {
   const [deletingId,       setDeletingId]       = useState(null)
   const [pendingClientIds, setPendingClientIds] = useState(new Set())
 
+  // Magazine search
+  const [magSearch,    setMagSearch]    = useState('')
+  const [magResults,   setMagResults]   = useState([])   // null = not yet searched
+  const [magSearching, setMagSearching] = useState(false)
+
   // Or — submitted articles + approved "other" assigned to Or
   const [pendingArticles,   setPendingArticles]   = useState([])
   // Publisher — approved articles table
@@ -195,6 +208,29 @@ export default function ClientsPage() {
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [role, refreshOrArticles, refreshPublisherArticles, refreshDeniseArticles])
+
+  // ── Magazine search ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const term = normalizeMag(magSearch)
+    if (!term) { setMagResults([]); return }
+
+    const timer = setTimeout(async () => {
+      setMagSearching(true)
+      // Fetch candidates with a broad ilike, then normalize client-side
+      const { data } = await supabase
+        .from('articles')
+        .select('id, client_id, magazine, created_at, published_at, clients(name)')
+        .ilike('magazine', `%${term}%`)
+        .order('created_at', { ascending: false })
+
+      const matched = (data ?? []).filter(a => normalizeMag(a.magazine) === term)
+      setMagResults(matched)
+      setMagSearching(false)
+    }, 350)
+
+    return () => clearTimeout(timer)
+  }, [magSearch])
 
   // ── Close popup on outside click ─────────────────────────────────────────────
 
@@ -378,6 +414,14 @@ export default function ClientsPage() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
+              <input
+                className="clients-search"
+                type="search"
+                placeholder="Search magazine…"
+                value={magSearch}
+                onChange={e => setMagSearch(e.target.value)}
+                style={{ marginLeft: 8 }}
+              />
             </div>
           </>
         )}
@@ -385,11 +429,49 @@ export default function ClientsPage() {
 
       {loading && <div className="loading-inline">Loading…</div>}
 
+      {/* ── Magazine search results ── */}
+      {!loading && magSearch.trim() && (
+        <div style={{ marginBottom: 24 }}>
+          {magSearching ? (
+            <div className="loading-inline">Searching…</div>
+          ) : magResults.length === 0 ? (
+            <div className="empty-state"><p>No articles found for this magazine.</p></div>
+          ) : (
+            <table className="pending-articles-table" style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th>Added date</th>
+                  <th>Published date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {magResults.map(article => (
+                  <tr
+                    key={article.id}
+                    className="pending-article-row"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/clients/${article.client_id}?article=${article.id}`)}
+                  >
+                    <td className="col-client">{article.clients?.name ?? '—'}</td>
+                    <td className="col-date">{fmtDate(article.created_at)}</td>
+                    <td className="col-date">{fmtDate(article.published_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── Role-based layouts (hidden while magazine search is active) ── */}
+      {!loading && !magSearch.trim() && <>
+
       {/* ── Or layout ── */}
-      {!loading && role === 'or' && pendingArticles.length === 0 && (
+      {role === 'or' && pendingArticles.length === 0 && (
         <ClientFoldersGrid {...folderProps} />
       )}
-      {!loading && role === 'or' && pendingArticles.length > 0 && (
+      {role === 'or' && pendingArticles.length > 0 && (
         <TaskTableLayout
           articles={pendingArticles}
           tableTitle="Needs attention"
@@ -400,10 +482,10 @@ export default function ClientsPage() {
       )}
 
       {/* ── Publisher layout ── */}
-      {!loading && role === 'publisher' && publisherArticles.length === 0 && (
+      {role === 'publisher' && publisherArticles.length === 0 && (
         <ClientFoldersGrid {...folderProps} />
       )}
-      {!loading && role === 'publisher' && publisherArticles.length > 0 && (
+      {role === 'publisher' && publisherArticles.length > 0 && (
         <TaskTableLayout
           articles={publisherArticles}
           tableTitle="To send"
@@ -414,7 +496,7 @@ export default function ClientsPage() {
       )}
 
       {/* ── Denise: assigned "other" articles table + folders ── */}
-      {!loading && role === 'denise' && deniseArticles.length === 0 && (
+      {role === 'denise' && deniseArticles.length === 0 && (
         visibleClients.length === 0 ? (
           <div className="empty-state">
             {search ? <p>No clients match "{search}".</p> : <p>No clients yet. Add your first one above.</p>}
@@ -423,7 +505,7 @@ export default function ClientsPage() {
           <ClientFoldersGrid {...folderProps} />
         )
       )}
-      {!loading && role === 'denise' && deniseArticles.length > 0 && (
+      {role === 'denise' && deniseArticles.length > 0 && (
         <TaskTableLayout
           articles={deniseArticles}
           tableTitle="To send"
@@ -434,7 +516,7 @@ export default function ClientsPage() {
       )}
 
       {/* ── Other roles: flat grid ── */}
-      {!loading && role !== 'or' && role !== 'publisher' && role !== 'denise' && (
+      {role !== 'or' && role !== 'publisher' && role !== 'denise' && (
         visibleClients.length === 0 ? (
           <div className="empty-state">
             {search ? <p>No clients match "{search}".</p> : <p>No clients yet. Add your first one above.</p>}
@@ -443,6 +525,8 @@ export default function ClientsPage() {
           <ClientFoldersGrid {...folderProps} />
         )
       )}
+
+      </> /* end role-based layouts */}
 
       {/* ── Row action popup ── */}
       {popup && (
