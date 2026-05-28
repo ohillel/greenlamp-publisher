@@ -114,9 +114,10 @@ export default function ClientsPage() {
   const [pendingClientIds, setPendingClientIds] = useState(new Set())
 
   // Magazine search
-  const [magSearch,    setMagSearch]    = useState('')
-  const [magResults,   setMagResults]   = useState([])   // null = not yet searched
-  const [magSearching, setMagSearching] = useState(false)
+  const [magSearch,      setMagSearch]      = useState('')
+  const [magResults,     setMagResults]     = useState([])
+  const [magSearching,   setMagSearching]   = useState(false)
+  const [magMonthFilter, setMagMonthFilter] = useState('all')
 
   // Or — submitted articles + approved "other" assigned to Or
   const [pendingArticles,   setPendingArticles]   = useState([])
@@ -213,6 +214,7 @@ export default function ClientsPage() {
 
   useEffect(() => {
     const term = normalizeMag(magSearch)
+    setMagMonthFilter('all')
     if (!term) { setMagResults([]); return }
 
     const timer = setTimeout(async () => {
@@ -430,39 +432,81 @@ export default function ClientsPage() {
       {loading && <div className="loading-inline">Loading…</div>}
 
       {/* ── Magazine search results ── */}
-      {!loading && magSearch.trim() && (
-        <div style={{ marginBottom: 24 }}>
-          {magSearching ? (
-            <div className="loading-inline">Searching…</div>
-          ) : magResults.length === 0 ? (
-            <div className="empty-state"><p>No articles found for this magazine.</p></div>
-          ) : (
-            <table className="pending-articles-table" style={{ width: '100%' }}>
-              <thead>
-                <tr>
-                  <th>Client</th>
-                  <th>Added date</th>
-                  <th>Published date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {magResults.map(article => (
-                  <tr
-                    key={article.id}
-                    className="pending-article-row"
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => navigate(`/clients/${article.client_id}?article=${article.id}`)}
-                  >
-                    <td className="col-client">{article.clients?.name ?? '—'}</td>
-                    <td className="col-date">{fmtDate(article.created_at)}</td>
-                    <td className="col-date">{fmtDate(article.published_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+      {!loading && magSearch.trim() && (() => {
+        // Derive sorted month list from results
+        const magMonths = (() => {
+          const seen = new Set()
+          const months = []
+          for (const a of magResults) {
+            if (!a.created_at) continue
+            const d   = new Date(a.created_at)
+            const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+            if (!seen.has(key)) {
+              seen.add(key)
+              months.push({ key, label: d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) })
+            }
+          }
+          return months.sort((a, b) => b.key.localeCompare(a.key))
+        })()
+
+        const visibleMagResults = magMonthFilter === 'all'
+          ? magResults
+          : magResults.filter(a =>
+              a.created_at && new Date(a.created_at).toISOString().slice(0, 7) === magMonthFilter
+            )
+
+        return (
+          <div style={{ marginBottom: 24 }}>
+            {magSearching ? (
+              <div className="loading-inline">Searching…</div>
+            ) : magResults.length === 0 ? (
+              <div className="empty-state"><p>No articles found for this magazine.</p></div>
+            ) : (
+              <>
+                {magMonths.length > 1 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <select
+                      value={magMonthFilter}
+                      onChange={e => setMagMonthFilter(e.target.value)}
+                      style={{ height: 32, padding: '0 10px', border: '1px solid #d1d5db', borderRadius: 6, background: '#ffffff', color: '#111827', fontSize: 13, cursor: 'pointer' }}
+                    >
+                      <option value="all">All months</option>
+                      {magMonths.map(({ key, label }) => (
+                        <option key={key} value={key}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <table className="pending-articles-table" style={{ width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th>Client</th>
+                      <th>Added date</th>
+                      <th>Published date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleMagResults.length === 0 ? (
+                      <tr><td colSpan={3} style={{ textAlign: 'center', color: '#6b7280', padding: 16 }}>No articles in this month.</td></tr>
+                    ) : visibleMagResults.map(article => (
+                      <tr
+                        key={article.id}
+                        className="pending-article-row"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => navigate(`/clients/${article.client_id}?article=${article.id}`)}
+                      >
+                        <td className="col-client">{article.clients?.name ?? '—'}</td>
+                        <td className="col-date">{fmtDate(article.created_at)}</td>
+                        <td className="col-date">{article.published_at ? fmtDate(article.published_at) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── Role-based layouts (hidden while magazine search is active) ── */}
       {!loading && !magSearch.trim() && <>
