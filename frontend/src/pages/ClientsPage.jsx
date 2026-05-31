@@ -217,6 +217,14 @@ export default function ClientsPage() {
   const [magClientFilter,  setMagClientFilter]  = useState('all')
   const magInputRef = useRef(null)
 
+  // Published URL search
+  const [urlInput,       setUrlInput]       = useState('')
+  const [urlSelected,    setUrlSelected]    = useState('')
+  const [urlSuggestions, setUrlSuggestions] = useState([])
+  const [urlResults,     setUrlResults]     = useState([])
+  const [urlSearching,   setUrlSearching]   = useState(false)
+  const urlInputRef = useRef(null)
+
   // Or — submitted articles + approved "other" assigned to Or
   const [pendingArticles,   setPendingArticles]   = useState([])
   // Publisher — approved articles table
@@ -359,6 +367,56 @@ export default function ClientsPage() {
       setMagSearching(false)
     })()
   }, [magSelected])
+
+  // ── Published URL search: suggestions while typing ──────────────────────────
+
+  useEffect(() => {
+    const term = urlInput.trim()
+    if (!term || urlSelected) { setUrlSuggestions([]); return }
+
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('articles')
+        .select('published_url')
+        .eq('status', 'published')
+        .ilike('published_url', `%${term}%`)
+        .limit(200)
+
+      const seen = new Set()
+      const suggestions = []
+      for (const row of data ?? []) {
+        const val = (row.published_url ?? '').trim()
+        if (val && val.toLowerCase().includes(term.toLowerCase()) && !seen.has(val)) {
+          seen.add(val)
+          suggestions.push(val)
+        }
+      }
+      suggestions.sort()
+      setUrlSuggestions(suggestions)
+    }, 200)
+
+    return () => clearTimeout(timer)
+  }, [urlInput, urlSelected])
+
+  // ── Published URL search: fetch results after selection ──────────────────────
+
+  useEffect(() => {
+    const term = urlSelected.trim()
+    if (!term) { setUrlResults([]); return }
+
+    ;(async () => {
+      setUrlSearching(true)
+      const { data } = await supabase
+        .from('articles')
+        .select('id, client_id, magazine, published_at, clients(name)')
+        .eq('status', 'published')
+        .eq('published_url', term)
+        .order('published_at', { ascending: false })
+
+      setUrlResults(data ?? [])
+      setUrlSearching(false)
+    })()
+  }, [urlSelected])
 
   // ── Close popup on outside click ─────────────────────────────────────────────
 
@@ -585,6 +643,49 @@ export default function ClientsPage() {
                   </div>
                 )}
               </div>
+              <div style={{ position: 'relative', marginLeft: 8 }}>
+                <input
+                  ref={urlInputRef}
+                  className="clients-search"
+                  type="search"
+                  placeholder="Search published URL…"
+                  value={urlInput}
+                  onChange={e => {
+                    setUrlInput(e.target.value)
+                    if (urlSelected) setUrlSelected('')
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') { setUrlInput(''); setUrlSelected(''); setUrlSuggestions([]) }
+                    if (e.key === 'Enter' && urlSuggestions.length === 1) {
+                      setUrlInput(urlSuggestions[0]); setUrlSelected(urlSuggestions[0]); setUrlSuggestions([])
+                    }
+                  }}
+                  autoComplete="off"
+                />
+                {urlSuggestions.length > 0 && (
+                  <div style={{
+                    position: 'absolute', top: '100%', left: 0, zIndex: 300, marginTop: 4,
+                    background: '#fff', border: '1px solid #d1d5db', borderRadius: 8,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 240, maxWidth: 360,
+                    maxHeight: 240, overflowY: 'auto',
+                  }}>
+                    {urlSuggestions.map(s => (
+                      <div
+                        key={s}
+                        onMouseDown={e => {
+                          e.preventDefault()
+                          setUrlInput(s); setUrlSelected(s); setUrlSuggestions([])
+                        }}
+                        style={{ padding: '8px 12px', fontSize: 13, cursor: 'pointer', color: '#111827' }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#f0fdf4' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                      >
+                        {s}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </>
         )}
@@ -686,6 +787,43 @@ export default function ClientsPage() {
           </div>
         )
       })()}
+
+      {/* ── Published URL search results ── */}
+      {!loading && urlSelected && (
+        <div style={{ marginBottom: 24 }}>
+          {urlSearching ? (
+            <div className="loading-inline">Searching…</div>
+          ) : urlResults.length === 0 ? (
+            <div className="empty-state"><p>No published articles found for this URL.</p></div>
+          ) : (
+            <table className="pending-articles-table" style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Client</th>
+                  <th>Magazine</th>
+                  <th>Published Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {urlResults.map((article, i) => (
+                  <tr
+                    key={article.id}
+                    className="pending-article-row"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/clients/${article.client_id}?article=${article.id}`)}
+                  >
+                    <td className="col-num">{i + 1}</td>
+                    <td className="col-client">{article.clients?.name ?? '—'}</td>
+                    <td className="col-magazine">{article.magazine ?? '—'}</td>
+                    <td className="col-date">{article.published_at ? fmtDate(article.published_at) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {/* ── Role-based layouts (hidden while magazine search is active) ── */}
       {!loading && !magSelected && <>
