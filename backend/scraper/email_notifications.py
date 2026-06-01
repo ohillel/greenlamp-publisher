@@ -9,6 +9,7 @@ Sender: seojobisrael@gmail.com
 import os
 import base64
 import sys
+import traceback
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -153,8 +154,10 @@ def send_retainer_email(
         f"{doc_line_plain}"
     )
 
+    print(f"[email/retainer] building email — to={to_addr!r} subject={subject!r}")
     try:
         service = _gmail_service()
+        print("[email/retainer] Gmail service acquired")
         msg = MIMEMultipart("alternative")
         msg["From"]    = SENDER
         msg["To"]      = to_addr
@@ -162,7 +165,9 @@ def send_retainer_email(
         msg.attach(MIMEText(plain, "plain", "utf-8"))
         msg.attach(MIMEText(html,  "html",  "utf-8"))
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-        service.users().messages().send(userId="me", body={"raw": raw}).execute()
-        print(f"[email/retainer] sent to {to_addr!r}: {subject!r}")
+        print("[email/retainer] calling Gmail API send…")
+        result = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        print(f"[email/retainer] sent OK — message_id={result.get('id')!r} to={to_addr!r}")
     except Exception as e:
-        print(f"[email/retainer] error: {e}")
+        print(f"[email/retainer] ERROR: {e}")
+        traceback.print_exc()
