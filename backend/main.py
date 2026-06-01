@@ -16,7 +16,7 @@ from scraper.status_checker import run_status_check          # noqa: E402
 from scraper.gmail_checker import check_gmail_notifications  # noqa: E402
 from scraper.reminder_checker import check_stale_articles    # noqa: E402
 from scraper.push_notifications import send_push_to_roles    # noqa: E402
-from scraper.email_notifications import send_email_to_roles, send_retainer_email  # noqa: E402
+from scraper.email_notifications import send_email_to_roles, send_retainer_email, _ROLE_EMAILS  # noqa: E402
 
 
 def _sb():
@@ -56,6 +56,7 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     print(f"[scheduler] started — status check + Gmail check every {CHECK_INTERVAL_MINUTES} minutes, reminder check every hour")
     print(f"[startup] CORS_ORIGINS={_CORS_ORIGINS}")
+    print(f"[startup] publisher email = {_ROLE_EMAILS.get('publisher', 'NOT FOUND')}")
     yield
     scheduler.shutdown(wait=False)
     print("[scheduler] stopped")
