@@ -136,7 +136,12 @@ def send_retainer_email(
     to_addr = "office@greenlamp.co"
     subject = f"Please add to retainer — {client_name} | {mag}"
 
-    doc_line_html  = f'<p><strong>Google Doc (Pricing):</strong> <a href="{google_doc_url}">{google_doc_url}</a></p>' if google_doc_url else ""
+    doc_line_html  = (
+        f'<a href="{google_doc_url}" style="display:inline-block;margin-top:10px;'
+        f'background:#1d4ed8;color:#fff;text-decoration:none;'
+        f'padding:10px 20px;border-radius:6px;font-size:14px;font-weight:500">'
+        f'Google Doc (Pricing) →</a><br>'
+    ) if google_doc_url else ""
     doc_line_plain = f"\nGoogle Doc (Pricing): {google_doc_url}" if google_doc_url else ""
 
     html = f"""\
