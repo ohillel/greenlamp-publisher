@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
     print(f"[scheduler] started — status check + Gmail check every {CHECK_INTERVAL_MINUTES} minutes, reminder check every hour")
+    print(f"[startup] CORS_ORIGINS={_CORS_ORIGINS}")
     yield
     scheduler.shutdown(wait=False)
     print("[scheduler] stopped")
