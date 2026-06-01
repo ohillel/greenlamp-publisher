@@ -16,7 +16,7 @@ APP_URL = "https://greenlamp-publisher.vercel.app"
 
 _ROLE_EMAILS: dict[str, str] = {
     "or":        "seojobisrael@gmail.com",
-    "publisher": "office@greenlamp.co",
+    "publisher": "edenlee@greenlamp.co",
     "denise":    "denise@greenlamp.co",
 }
 
