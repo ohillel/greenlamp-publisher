@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import Layout from '../components/Layout'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE = 'https://greenlamp-publisher-production-75fd.up.railway.app'
 
 const ROLE_LABEL = {
   or:        'Or',

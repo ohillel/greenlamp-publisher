@@ -9,7 +9,7 @@ import {
 } from 'react'
 import { supabase } from '../lib/supabase'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE = 'https://greenlamp-publisher-production-75fd.up.railway.app'
 
 async function registerPush(userId) {
   try {

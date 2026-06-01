@@ -10,7 +10,7 @@ import { supabase } from '../lib/supabase'
 const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 const fmtDate  = ts => ts ? new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE = 'https://greenlamp-publisher-production-75fd.up.railway.app'
 
 const sendNotify = (event, clientName, magazine, reason, articleId, clientId) => {
   const payload = {

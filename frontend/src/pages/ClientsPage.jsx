@@ -4,7 +4,7 @@ import Layout from '../components/Layout'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API_BASE = 'https://greenlamp-publisher-production-75fd.up.railway.app'
 
 const PUB_LABEL = { presswhizz: 'PressWhizz', linksme: 'Links.me', other: 'Other' }
 
