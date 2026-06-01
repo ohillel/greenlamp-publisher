@@ -367,15 +367,23 @@ async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
 
         await run_in_threadpool(send_email_to_roles, roles, body, email_body,
                                 extra_links or None, deep_link)
+        print(f"[notify] send_email_to_roles completed for event={req.event!r}")
 
         # Send retainer email to office@greenlamp.co when an article is published
         if req.event == "published":
-            await run_in_threadpool(
-                send_retainer_email,
-                req.client_name,
-                req.magazine,
-                _client_doc_url,
-            )
+            print(f"[notify/retainer] firing send_retainer_email — client={req.client_name!r} magazine={req.magazine!r} doc_url={_client_doc_url!r}")
+            try:
+                await run_in_threadpool(
+                    send_retainer_email,
+                    req.client_name,
+                    req.magazine,
+                    _client_doc_url,
+                )
+                print("[notify/retainer] send_retainer_email completed OK")
+            except Exception as retainer_err:
+                print(f"[notify/retainer] ERROR: {retainer_err}")
+        else:
+            print(f"[notify/retainer] skipped — event is {req.event!r}, not 'published'")
 
         # When an article is submitted, kick off price fetching in the background
         # so Or sees prices already populated when he opens the article.
