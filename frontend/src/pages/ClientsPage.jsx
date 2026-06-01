@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import * as XLSX from 'xlsx'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
@@ -229,6 +230,48 @@ export default function ClientsPage() {
   const inputRef = useRef(null)
   const navigate = useNavigate()
   const { role } = useAuth()
+
+  // ── Export to Excel ──────────────────────────────────────────────────────────
+
+  const [exporting, setExporting] = useState(false)
+
+  const exportToExcel = async () => {
+    setExporting(true)
+    const { data } = await supabase
+      .from('articles')
+      .select('client_id, magazine, chosen_publisher, price_presswhizz, price_linksme, published_url, created_at, published_at, published_country, clients(name)')
+      .eq('status', 'published')
+      .order('published_at', { ascending: false })
+
+    const fmt = ts => {
+      if (!ts) return ''
+      const d = new Date(ts)
+      return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`
+    }
+
+    const PUB = { presswhizz: 'PressWhizz', linksme: 'Links.me', other: 'Other' }
+
+    const rows = (data ?? []).map(a => {
+      const pub   = a.chosen_publisher
+      const price = pub === 'presswhizz' ? a.price_presswhizz : pub === 'linksme' ? a.price_linksme : null
+      return {
+        'Client':     a.clients?.name ?? '',
+        'Website':    a.magazine ?? '',
+        'Platform':   PUB[pub] ?? pub ?? '',
+        'Price':      price != null ? price : '',
+        'Live URL':   a.published_url ?? '',
+        'Added':      fmt(a.created_at),
+        'Published':  fmt(a.published_at),
+        'CY/IL':      a.published_country ?? '',
+      }
+    })
+
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Published Articles')
+    XLSX.writeFile(wb, 'published-articles.xlsx')
+    setExporting(false)
+  }
 
   // ── Fetch clients ────────────────────────────────────────────────────────────
 
@@ -534,6 +577,16 @@ export default function ClientsPage() {
             <button className="btn-add-client" onClick={() => setAdding(true)}>
               + New Client
             </button>
+            {role === 'or' && (
+              <button
+                className="btn-ghost"
+                onClick={exportToExcel}
+                disabled={exporting}
+                style={{ marginLeft: 8 }}
+              >
+                {exporting ? 'Exporting…' : '↓ Export to Excel'}
+              </button>
+            )}
             <div className="clients-search-wrap">
               <input
                 className="clients-search"
