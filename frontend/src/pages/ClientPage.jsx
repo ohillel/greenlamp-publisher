@@ -19,11 +19,15 @@ const sendNotify = (event, clientName, magazine, reason, articleId, clientId) =>
     ...(articleId ? { article_id: articleId } : {}),
     ...(clientId  ? { client_id:  clientId  } : {}),
   }
-  fetch(`${API_BASE}/api/notify`, {
+  const url = `${API_BASE}/api/notify`
+  console.log('[notify] calling API:', url, payload)
+  fetch(url, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify(payload),
-  }).catch(err => console.warn('[notify] fetch failed:', err))
+  }).then(res => {
+    console.log('[notify] response status:', res.status)
+  }).catch(err => console.error('[notify] fetch error:', err))
 }
 
 const PUBLISHERS = [
