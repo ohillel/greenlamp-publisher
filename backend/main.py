@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     print("[scheduler] stopped")
 
 
-_CORS_ORIGINS = [o.strip() for o in os.environ.get(
+_CORS_ORIGINS = [o.strip().rstrip("/") for o in os.environ.get(
     "CORS_ORIGINS",
     "http://localhost:5173",
 ).split(",") if o.strip()]
@@ -73,7 +73,7 @@ app.add_middleware(
     allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Authorization", "apikey", "x-client-info", "x-supabase-api-version"],
 )
 
 
