@@ -94,6 +94,11 @@ def health_check():
     return {"status": "ok", "email_backend": "gmail_api_v1"}
 
 
+@app.get("/api/cors-test")
+def cors_test():
+    return {"cors_origins": _CORS_ORIGINS}
+
+
 class PricesRequest(BaseModel):
     magazine: str    # magazine domain, e.g. "investing.com"
     client_name: str # Links.me project name, e.g. "echo.ai"
