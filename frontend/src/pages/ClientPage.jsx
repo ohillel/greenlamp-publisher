@@ -142,6 +142,9 @@ function DeniseArticleCard({
                   <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
                     {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
                   </a>
+                  {article.published_country && (
+                    <span style={{ color: '#15803d', fontSize: 12, fontWeight: 600 }}>| {article.published_country}</span>
+                  )}
                   {article.published_at && (
                     <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}><span style={{ opacity: 0.7 }}>Published:</span> {fmtDate(article.published_at)}</span>
                   )}
@@ -256,6 +259,7 @@ export default function ClientPage() {
   const [publishUrlId,   setPublishUrlId]   = useState(null)  // article showing URL input
   const [publishUrl,     setPublishUrl]     = useState('')
   const [publishUrlError, setPublishUrlError] = useState('')
+  const [publishCountry, setPublishCountry] = useState('')    // 'IL' | 'CY' | ''
 
   // ── Initial data fetch ───────────────────────────────────────────────────────
 
@@ -585,7 +589,7 @@ export default function ClientPage() {
     setOverridingId(id)
     setPublishUrlError('')
     const article = articles.find(a => a.id === id)
-    const update = { status: 'published', published_url: url || null, published_at: new Date().toISOString() }
+    const update = { status: 'published', published_url: url || null, published_at: new Date().toISOString(), published_country: publishCountry || null }
 
     console.log('[confirmPublished] updating article', id, 'with', update)
     const { data, error } = await supabase
@@ -599,6 +603,7 @@ export default function ClientPage() {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, ...update } : a))
       setPublishUrlId(null)
       setPublishUrl('')
+      setPublishCountry('')
       sendNotify('published', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
     } else {
       // Keep input open so Or can see the error and retry
@@ -622,7 +627,7 @@ export default function ClientPage() {
 
   const undoOverride = async id => {
     setOverridingId(id)
-    const update = { status: 'sent_to_publisher', published_url: null }
+    const update = { status: 'sent_to_publisher', published_url: null, published_country: null }
     const { error } = await supabase.from('articles').update(update).eq('id', id)
     if (!error) {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, ...update } : a))
@@ -1033,6 +1038,9 @@ export default function ClientPage() {
                       <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
                         {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
                       </a>
+                      {article.published_country && (
+                        <span style={{ color: '#15803d', fontSize: 12, fontWeight: 600 }}>| {article.published_country}</span>
+                      )}
                       {article.published_at && (
                         <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}><span style={{ opacity: 0.7 }}>Published:</span> {fmtDate(article.published_at)}</span>
                       )}
@@ -1127,6 +1135,25 @@ export default function ClientPage() {
                       autoFocus
                       onKeyDown={e => { if (e.key === 'Enter') confirmPublished(article.id, publishUrl) }}
                     />
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                      {['IL', 'CY'].map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setPublishCountry(prev => prev === c ? '' : c)}
+                          style={{
+                            padding: '4px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                            border: '1.5px solid',
+                            borderColor: publishCountry === c ? '#16a34a' : '#d1d5db',
+                            background: publishCountry === c ? '#dcfce7' : '#f9fafb',
+                            color: publishCountry === c ? '#15803d' : '#374151',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
                     {publishUrlError && (
                       <p className="form-error" style={{ marginTop: 4, fontSize: 12 }}>{publishUrlError}</p>
                     )}
@@ -1139,7 +1166,7 @@ export default function ClientPage() {
                       >
                         {overridingId === article.id ? 'Saving…' : 'Confirm Published'}
                       </button>
-                      <button className="btn-ghost" onClick={() => { setPublishUrlId(null); setPublishUrl(''); setPublishUrlError('') }}>Cancel</button>
+                      <button className="btn-ghost" onClick={() => { setPublishUrlId(null); setPublishUrl(''); setPublishUrlError(''); setPublishCountry('') }}>Cancel</button>
                     </div>
                   </div>
                 ) : (
@@ -1279,6 +1306,9 @@ export default function ClientPage() {
                       <a href={article.published_url} target="_blank" rel="noreferrer" className="doc-link" style={{ color: '#16a34a' }}>
                         {article.published_url.length > 50 ? article.published_url.slice(0, 50) + '…' : article.published_url}
                       </a>
+                      {article.published_country && (
+                        <span style={{ color: '#15803d', fontSize: 12, fontWeight: 600 }}>| {article.published_country}</span>
+                      )}
                       {article.published_at && (
                         <span style={{ color: '#16a34a', fontSize: 11, opacity: 0.75 }}><span style={{ opacity: 0.7 }}>Published:</span> {fmtDate(article.published_at)}</span>
                       )}
