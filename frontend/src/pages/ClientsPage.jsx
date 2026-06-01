@@ -233,15 +233,54 @@ export default function ClientsPage() {
 
   // ── Export to Excel ──────────────────────────────────────────────────────────
 
-  const [exporting, setExporting] = useState(false)
+  const [exporting,       setExporting]       = useState(false)
+  const [exportMonth,     setExportMonth]      = useState('all')
+  const [exportCountry,   setExportCountry]    = useState('all')
+  const [exportMonthOpts, setExportMonthOpts]  = useState([])  // [{value:'2026-05', label:'May 2026'}]
+
+  // Fetch distinct published months for the dropdown
+  useEffect(() => {
+    if (role !== 'or') return
+    supabase
+      .from('articles')
+      .select('published_at')
+      .eq('status', 'published')
+      .not('published_at', 'is', null)
+      .then(({ data }) => {
+        const seen = new Set()
+        const opts = []
+        for (const row of (data ?? []).sort((a, b) => b.published_at.localeCompare(a.published_at))) {
+          const d   = new Date(row.published_at)
+          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+          if (!seen.has(key)) {
+            seen.add(key)
+            opts.push({ value: key, label: d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) })
+          }
+        }
+        setExportMonthOpts(opts)
+      })
+  }, [role])
 
   const exportToExcel = async () => {
     setExporting(true)
-    const { data } = await supabase
+    let query = supabase
       .from('articles')
       .select('client_id, magazine, chosen_publisher, price_presswhizz, price_linksme, published_url, created_at, published_at, published_country, clients(name)')
       .eq('status', 'published')
+      .not('published_at', 'is', null)
       .order('published_at', { ascending: false })
+
+    if (exportMonth !== 'all') {
+      const [year, month] = exportMonth.split('-').map(Number)
+      const from = new Date(year, month - 1, 1).toISOString()
+      const to   = new Date(year, month, 1).toISOString()
+      query = query.gte('published_at', from).lt('published_at', to)
+    }
+    if (exportCountry !== 'all') {
+      query = query.eq('published_country', exportCountry)
+    }
+
+    const { data } = await query
 
     const fmt = ts => {
       if (!ts) return ''
@@ -269,7 +308,9 @@ export default function ClientsPage() {
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Published Articles')
-    XLSX.writeFile(wb, 'published-articles.xlsx')
+    const monthSuffix   = exportMonth   !== 'all' ? `-${exportMonth}`    : ''
+    const countrySuffix = exportCountry !== 'all' ? `-${exportCountry}`  : ''
+    XLSX.writeFile(wb, `published-articles${monthSuffix}${countrySuffix}.xlsx`)
     setExporting(false)
   }
 
@@ -578,14 +619,34 @@ export default function ClientsPage() {
               + New Client
             </button>
             {role === 'or' && (
-              <button
-                className="btn-ghost"
-                onClick={exportToExcel}
-                disabled={exporting}
-                style={{ marginLeft: 8 }}
-              >
-                {exporting ? 'Exporting…' : '↓ Export to Excel'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
+                <select
+                  value={exportMonth}
+                  onChange={e => setExportMonth(e.target.value)}
+                  style={{ height: 32, padding: '0 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, background: '#fff', color: '#111827' }}
+                >
+                  <option value="all">All months</option>
+                  {exportMonthOpts.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={exportCountry}
+                  onChange={e => setExportCountry(e.target.value)}
+                  style={{ height: 32, padding: '0 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 13, background: '#fff', color: '#111827' }}
+                >
+                  <option value="all">All</option>
+                  <option value="IL">IL</option>
+                  <option value="CY">CY</option>
+                </select>
+                <button
+                  className="btn-ghost"
+                  onClick={exportToExcel}
+                  disabled={exporting}
+                >
+                  {exporting ? 'Exporting…' : '↓ Export to Excel'}
+                </button>
+              </div>
             )}
             <div className="clients-search-wrap">
               <input
