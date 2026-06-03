@@ -184,7 +184,7 @@ class NotifyRequest(BaseModel):
     article_id:  str | None = None  # triggers background price fetch on 'submitted'; used for deep link
     client_id:   str | None = None  # used to build the email deep link
 
-_APP_URL = "https://greenlamp-publisher.vercel.app"
+_APP_URL = "https://greenlamp-publisher-psi.vercel.app"
 
 
 _NOTIFY_MAP: dict[str, tuple[list[str], str]] = {

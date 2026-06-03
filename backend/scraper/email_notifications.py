@@ -13,7 +13,7 @@ import traceback
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-APP_URL = "https://greenlamp-publisher.vercel.app"
+APP_URL = "https://greenlamp-publisher-psi.vercel.app"
 
 _ROLE_EMAILS: dict[str, str] = {
     "or":        "seojobisrael@gmail.com",
