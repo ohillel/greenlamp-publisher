@@ -367,10 +367,14 @@ export default function ClientsPage() {
     if (role !== 'publisher') return
     const { data } = await supabase
       .from('articles')
-      .select('id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, clients(name)')
+      .select('id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, assigned_to, clients(name)')
       .eq('status', 'approved')
       .order('created_at', { ascending: true })
-    const articles = data ?? []
+    // Include non-Other articles + Other articles explicitly assigned to the publisher role
+    const articles = (data ?? []).filter(a =>
+      (a.chosen_publisher || a.preferred_publisher) !== 'other' ||
+      a.assigned_to === 'publisher'
+    )
     setPublisherArticles(articles)
     setPendingClientIds(new Set(articles.map(a => a.client_id)))
   }, [role])

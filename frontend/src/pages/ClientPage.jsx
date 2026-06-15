@@ -551,6 +551,8 @@ export default function ClientPage() {
       setArticles(prev => prev.map(a => a.id === id ? { ...a, ...updateData } : a))
       if (isOther && assignedTo === 'denise') {
         sendNotify('approved_other_denise', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
+      } else if (isOther && assignedTo === 'publisher') {
+        sendNotify('approved', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
       } else if (!isOther) {
         sendNotify('approved', client?.name ?? '', article?.magazine ?? '', undefined, id, clientId)
       }
@@ -1107,6 +1109,14 @@ export default function ClientPage() {
                             {approving === article.id ? 'Approving…' : '→ Assign to Denise'}
                           </button>
                           <button
+                            className="btn-approve"
+                            style={{ marginLeft: 0 }}
+                            onClick={() => approve(article.id, approveNotes, 'publisher', approveCustomNote || null, 'other')}
+                            disabled={approving === article.id}
+                          >
+                            {approving === article.id ? 'Approving…' : '→ Assign to Publisher'}
+                          </button>
+                          <button
                             className="btn-send"
                             style={{ marginLeft: 0 }}
                             onClick={() => approve(article.id, approveNotes, 'or', approveCustomNote || null, 'other')}
@@ -1322,7 +1332,7 @@ export default function ClientPage() {
               </div>
 
               <div className="card-actions" style={{ flexDirection: 'column', gap: 8 }}>
-                {article.status === 'approved' && article.preferred_publisher !== 'other' && (
+                {article.status === 'approved' && (article.preferred_publisher !== 'other' || article.assigned_to === 'publisher') && (
                   <>
                     <button className="btn-send" onClick={() => markSent(article.id)} disabled={markingId === article.id || returningId === article.id}>
                       {markingId === article.id ? 'Updating…' : 'Mark as sent to publisher'}
