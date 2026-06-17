@@ -177,16 +177,21 @@ def _run_with_captured_logs(fn, *args, **kwargs) -> dict:
         return {"value": None, "logs": buf.getvalue().splitlines(), "error": str(e)}
 
 
+class PriceCheckTestRequest(BaseModel):
+    domain: str = "trinituner.com"
+    client_name: str = "mstone"
+
+
 @app.post("/api/price-check/test")
-async def price_check_test():
+async def price_check_test(req: PriceCheckTestRequest = PriceCheckTestRequest()):
     """
-    Diagnostic endpoint: runs a single known domain ("trinituner.com") through
-    both PressWhizz and Links.me (client "mstone") and returns every log line
-    printed during the run, so selector/flow issues can be diagnosed without
+    Diagnostic endpoint: runs a single domain (default "trinituner.com") through
+    both PressWhizz and Links.me (default client "mstone") and returns every log
+    line printed during the run, so selector/flow issues can be diagnosed without
     Railway log access. Does not touch the per-article scraping flow.
     """
-    domain = "trinituner.com"
-    client_name = "mstone"
+    domain = req.domain
+    client_name = req.client_name
     print(f"[price-check/test] running diagnostic check for {domain!r}")
 
     pw_result = await run_in_threadpool(
