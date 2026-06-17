@@ -30,7 +30,13 @@ def fetch_prices(magazine_domain: str, client_name: str, debug: bool = False) ->
     def run_linksme():
         return linksme.get_price(magazine_domain, client_name, debug=debug)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    # Deliberately not using `with ThreadPoolExecutor(...) as executor:` —
+    # the context manager's __exit__ calls shutdown(wait=True), which would
+    # block on a still-running thread regardless of the per-future timeout
+    # below, defeating the whole point of bounding the wait. shutdown(wait=False)
+    # lets us return promptly and abandon any thread still stuck past its timeout.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    try:
         pw_future = executor.submit(run_presswhizz)
         lm_future = executor.submit(run_linksme)
 
@@ -43,6 +49,8 @@ def fetch_prices(magazine_domain: str, client_name: str, debug: bool = False) ->
             except Exception as e:
                 result["errors"][site] = str(e)
                 print(f"  [{site}] ERROR: {e}")
+    finally:
+        executor.shutdown(wait=False)
 
     if not result["errors"]:
         del result["errors"]

@@ -243,6 +243,46 @@ export default function ClientsPage() {
   const [pendingPubOpen,     setPendingPubOpen]     = useState(false)
   const [pendingPubArticles, setPendingPubArticles] = useState([])
 
+  // ── Price Check (Or-only bulk price checker → Google Sheet) ─────────────────
+
+  const [priceCheckOpen,    setPriceCheckOpen]    = useState(false)
+  const [priceCheckInput,   setPriceCheckInput]   = useState('')
+  const [priceCheckRunning, setPriceCheckRunning] = useState(false)
+  const [priceCheckError,   setPriceCheckError]   = useState('')
+  const [priceCheckSheetUrl, setPriceCheckSheetUrl] = useState('')
+
+  const openPriceCheck = () => {
+    setPriceCheckInput('')
+    setPriceCheckError('')
+    setPriceCheckSheetUrl('')
+    setPriceCheckRunning(false)
+    setPriceCheckOpen(true)
+  }
+
+  const runPriceCheck = async () => {
+    const urls = priceCheckInput.split('\n').map(s => s.trim()).filter(Boolean)
+    if (urls.length === 0) return
+    setPriceCheckRunning(true)
+    setPriceCheckError('')
+    setPriceCheckSheetUrl('')
+    try {
+      const res = await fetch(`${API_BASE}/api/price-check/bulk`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ urls }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || `Request failed (${res.status})`)
+      }
+      const data = await res.json()
+      setPriceCheckSheetUrl(data.sheet_url || '')
+    } catch (err) {
+      setPriceCheckError(err.message || 'Price check failed.')
+    }
+    setPriceCheckRunning(false)
+  }
+
   // Fetch distinct published months for the dropdown
   useEffect(() => {
     if (role !== 'or') return
@@ -686,6 +726,9 @@ export default function ClientsPage() {
                 >
                   Pending publication
                 </button>
+                <button className="btn-ghost" onClick={openPriceCheck}>
+                  Price Check
+                </button>
               </div>
             )}
             <div className="clients-search-wrap">
@@ -980,6 +1023,86 @@ export default function ClientsPage() {
           >
             Go to client folder
           </button>
+        </div>
+      )}
+
+      {/* ── Price Check modal (Or-only) ── */}
+      {priceCheckOpen && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 2000,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={() => { if (!priceCheckRunning) setPriceCheckOpen(false) }}
+        >
+          <div
+            style={{
+              background: '#fff', borderRadius: 10, padding: 24,
+              width: 520, maxWidth: '90vw', boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 4px', fontSize: 16, color: '#111827' }}>Price Check</h3>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: '#6b7280' }}>
+              Paste one URL or domain per line. Prices are checked on PressWhizz and Links.me
+              (catalog: mstone) and exported to a new Google Sheet.
+            </p>
+            <textarea
+              value={priceCheckInput}
+              onChange={e => setPriceCheckInput(e.target.value)}
+              disabled={priceCheckRunning}
+              placeholder={'https://www.globalbankingandfinance.com/\nt2conline.com\nanalyticssteps.com'}
+              style={{
+                width: '100%', height: 160, resize: 'vertical', boxSizing: 'border-box',
+                padding: 10, borderRadius: 6, border: '1px solid #d1d5db',
+                fontSize: 13, fontFamily: 'inherit', color: '#111827',
+              }}
+            />
+
+            {priceCheckError && (
+              <div style={{ marginTop: 10, fontSize: 13, color: '#dc2626' }}>{priceCheckError}</div>
+            )}
+
+            {priceCheckRunning && (
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#374151' }}>
+                <span className="price-spinner" />
+                Checking {priceCheckInput.split('\n').map(s => s.trim()).filter(Boolean).length} site(s)…
+              </div>
+            )}
+
+            {priceCheckSheetUrl && !priceCheckRunning && (
+              <div style={{ marginTop: 14, fontSize: 13, color: '#16a34a' }}>
+                Done — results exported to Google Sheets.
+              </div>
+            )}
+
+            <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                className="btn-ghost"
+                onClick={() => setPriceCheckOpen(false)}
+                disabled={priceCheckRunning}
+              >
+                Close
+              </button>
+              {priceCheckSheetUrl && !priceCheckRunning ? (
+                <button
+                  className="btn-save"
+                  onClick={() => window.open(priceCheckSheetUrl, '_blank', 'noopener')}
+                >
+                  Open in Google Sheets →
+                </button>
+              ) : (
+                <button
+                  className="btn-save"
+                  onClick={runPriceCheck}
+                  disabled={priceCheckRunning || priceCheckInput.trim() === ''}
+                >
+                  {priceCheckRunning ? 'Running…' : 'Run Price Check'}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </Layout>

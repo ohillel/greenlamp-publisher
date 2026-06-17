@@ -18,6 +18,8 @@ from scraper.gmail_checker import check_gmail_notifications  # noqa: E402
 from scraper.reminder_checker import check_stale_articles    # noqa: E402
 from scraper.push_notifications import send_push_to_roles    # noqa: E402
 from scraper.email_notifications import send_email_to_roles, send_retainer_email, _ROLE_EMAILS  # noqa: E402
+from scraper.bulk_price_check import check_prices_bulk                                            # noqa: E402
+from scraper.sheets_export import create_price_check_sheet                                        # noqa: E402
 
 
 def _sb():
@@ -128,6 +130,35 @@ async def get_prices(req: PricesRequest):
         print(f"[api/prices] result={result!r}")
         return result
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class BulkPriceCheckRequest(BaseModel):
+    urls: list[str]   # arbitrary pasted URLs or bare domains, one per line
+
+
+@app.post("/api/price-check/bulk")
+async def price_check_bulk(req: BulkPriceCheckRequest):
+    """
+    Or-only ad-hoc price checker: fetches PressWhizz + Links.me prices for a
+    pasted list of URLs/domains (Links.me looked up under the "mstone"
+    catalog) and exports the results to a new Google Sheet.
+    Role enforcement is on the frontend, same as the other Or-only endpoints
+    — the service-role key used here must never be exposed to non-Or users.
+    Does not touch the per-article scraping flow (prices.py) or its sessions.
+    """
+    urls = [u.strip() for u in req.urls if u.strip()]
+    if not urls:
+        raise HTTPException(status_code=422, detail="urls must contain at least one entry")
+    print(f"[price-check/bulk] checking {len(urls)} url(s)")
+    try:
+        results = await run_in_threadpool(check_prices_bulk, urls)
+        print(f"[price-check/bulk] fetched prices, creating sheet…")
+        sheet_url = await run_in_threadpool(create_price_check_sheet, results)
+        print(f"[price-check/bulk] sheet created: {sheet_url}")
+        return {"results": results, "sheet_url": sheet_url}
+    except Exception as e:
+        print(f"[price-check/bulk] ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
