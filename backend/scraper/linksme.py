@@ -148,39 +148,48 @@ def _find_guest_posting_url(page, client_name: str, debug: bool) -> str | None:
     )
     project_names = _parse_project_names(page)
 
-    if debug:
-        print(f"  [linksme] {len(project_names)} projects, {len(gp_hrefs)} catalog links")
-        print(f"  [linksme] projects: {project_names[:10]}")
-        (Path(__file__).parent / "debug_screenshots" / "lm_projects_text.txt").write_text(
-            page.inner_text("body")[:5000]
-        )
+    print(f"  [linksme] {len(project_names)} projects, {len(gp_hrefs)} catalog links")
+    print(f"  [linksme] projects: {project_names[:20]}")
+    (Path(__file__).parent / "debug_screenshots" / "lm_projects_text.txt").write_text(
+        page.inner_text("body")[:5000]
+    )
+
+    if not project_names or not gp_hrefs:
+        print(f"  [linksme] WARNING: project_names or gp_hrefs is empty — dashboard "
+              f"structure may have changed. project_names={len(project_names)}, "
+              f"gp_hrefs={len(gp_hrefs)}")
 
     name_lower = client_name.lower()
 
     # Exact match
     for i, pname in enumerate(project_names):
         if name_lower == pname.lower() and i < len(gp_hrefs):
-            if debug:
-                print(f"  [linksme] exact match: {pname} → {gp_hrefs[i]}")
+            print(f"  [linksme] exact match: {pname} → {gp_hrefs[i]}")
             return gp_hrefs[i]
 
     # Partial match (client_name in project or vice versa)
     for i, pname in enumerate(project_names):
         if (name_lower in pname.lower() or pname.lower() in name_lower) and i < len(gp_hrefs):
-            if debug:
-                print(f"  [linksme] partial match: {pname} → {gp_hrefs[i]}")
+            print(f"  [linksme] partial match: {pname} → {gp_hrefs[i]}")
             return gp_hrefs[i]
 
     # Fuzzy: any word > 3 chars
     parts = [p for p in re.split(r'[\s._-]+', name_lower) if len(p) > 3]
     for i, pname in enumerate(project_names):
         if any(p in pname.lower() for p in parts) and i < len(gp_hrefs):
-            if debug:
-                print(f"  [linksme] fuzzy match '{client_name}' → {pname} → {gp_hrefs[i]}")
+            print(f"  [linksme] fuzzy match '{client_name}' → {pname} → {gp_hrefs[i]}")
             return gp_hrefs[i]
 
-    if debug:
-        print(f"  [linksme] no match for '{client_name}'")
+    # Fallback (logged loudly): if there's exactly one project, use it — covers
+    # accounts with a single project where the name doesn't match client_name
+    # due to a rename/typo, without silently widening matching for multi-project
+    # accounts where picking the wrong one would be worse than returning None.
+    if len(project_names) == 1 and gp_hrefs:
+        print(f"  [linksme] FALLBACK: no name match for '{client_name}', but exactly "
+              f"one project exists ({project_names[0]}) — using it")
+        return gp_hrefs[0]
+
+    print(f"  [linksme] no match for '{client_name}' among projects: {project_names}")
     return None
 
 
@@ -195,8 +204,12 @@ def _apply_domain_filter(page, magazine_domain: str, debug: bool):
     )
     if filter_link:
         filter_link.click()
+        print("  [linksme] clicked Filter link")
         _wait(page, 1500)
-        screenshot(page, "lm_06_filter_open", debug)
+        screenshot(page, "lm_06_filter_open", True)
+    else:
+        print("  [linksme] WARNING: no Filter link/button found — filter panel may "
+              "already be open or site structure changed")
 
     # "Site Name or Keyword" input — placeholder is an example domain
     domain_input = None
@@ -213,20 +226,24 @@ def _apply_domain_filter(page, magazine_domain: str, debug: bool):
             el = page.query_selector(sel)
             if el and el.is_visible():
                 domain_input = el
+                print(f"  [linksme] domain filter input found via: {sel}")
                 break
         except Exception:
             pass
 
     if not domain_input:
-        screenshot(page, "lm_no_filter_input", debug)
-        if debug:
-            print("  [linksme] could not find Site Name or Keyword input")
+        print(f"  [linksme] FAILED to find Site Name or Keyword input — visible <input> "
+              f"count: {len(page.query_selector_all('input'))}")
+        screenshot(page, "lm_no_filter_input", True)
+        (Path(__file__).parent / "debug_screenshots" / "lm_no_filter_text.txt").write_text(
+            page.inner_text("body")[:8000]
+        )
         return
 
     domain_input.fill("")
     domain_input.fill(magazine_domain)
     _wait(page, 500)
-    screenshot(page, "lm_07_domain_filled", debug)
+    screenshot(page, "lm_07_domain_filled", True)
 
     # Click Apply (not "Apply and Save")
     apply_btn = None
@@ -241,6 +258,7 @@ def _apply_domain_filter(page, magazine_domain: str, debug: bool):
             btn = page.query_selector(sel)
             if btn and btn.is_visible() and 'save' not in _safe_text(btn).lower():
                 apply_btn = btn
+                print(f"  [linksme] Apply button found via: {sel}")
                 break
         except Exception:
             pass
@@ -249,17 +267,17 @@ def _apply_domain_filter(page, magazine_domain: str, debug: bool):
         apply_btn.click()
     else:
         page.keyboard.press("Enter")
+        print("  [linksme] no Apply button found — pressed Enter to apply filter")
 
     _wait(page, 3500)
-    screenshot(page, "lm_08_filtered", debug)
+    screenshot(page, "lm_08_filtered", True)
 
-    if debug:
-        filtered_text = page.inner_text("body")
-        (Path(__file__).parent / "debug_screenshots" / "lm_filtered_text.txt").write_text(
-            filtered_text[:6000]
-        )
-        print(f"  [linksme] filter applied — "
-              f"{'no records' if 'no records' in filtered_text.lower() else 'results found'}")
+    filtered_text = page.inner_text("body")
+    (Path(__file__).parent / "debug_screenshots" / "lm_filtered_text.txt").write_text(
+        filtered_text[:6000]
+    )
+    print(f"  [linksme] filter applied — "
+          f"{'no records' if 'no records' in filtered_text.lower() else 'results found'}")
 
 
 def _parse_price(text: str) -> int | None:
@@ -283,20 +301,22 @@ def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
     must compare the Site cell text exactly against magazine_domain to avoid
     returning prices for sites like 'rprinvesting.com' when searching 'investing.com'.
     """
-    screenshot(page, "pw_09_price_scan", debug)
+    screenshot(page, "lm_09_price_scan", True)
     prices: list[int] = []
 
     body_text = page.inner_text("body")
+    print(f"  [linksme] price scan: page text is {len(body_text)} chars")
     if "no records" in body_text.lower():
-        if debug:
-            print("  [linksme] no records — domain not in catalog")
+        print("  [linksme] no records — domain not in catalog under this client/project")
         return prices
 
     # Normalize the target domain so comparisons are scheme/www/slash-agnostic.
     domain_lower = _normalize_domain(magazine_domain)
 
     # Strategy 1: standard <tr>/<td> table
-    for row in page.query_selector_all('tr'):
+    all_rows = page.query_selector_all('tr')
+    seen_site_texts = []
+    for row in all_rows:
         cells = row.query_selector_all('td')
         if len(cells) < 2:
             continue
@@ -305,13 +325,20 @@ def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
         site_link = cells[0].query_selector('a')
         raw_text  = _safe_text(site_link) if site_link else _safe_text(cells[0])
         site_text = _normalize_domain(raw_text)
+        if site_text:
+            seen_site_texts.append(site_text)
         if site_text != domain_lower:
             continue
         # Price is in the last cell
         price_text = _safe_text(cells[-1])
         val = _parse_price(price_text)
+        print(f"  [linksme] strategy1: row matched '{site_text}' — price cell text "
+              f"{price_text!r} parsed as {val}")
         if val:
             prices.append(val)
+
+    print(f"  [linksme] strategy1: scanned {len(all_rows)} rows, site texts seen: "
+          f"{seen_site_texts[:20]}")
 
     # Strategy 2: walk from a site <a> link to its row and read last cell
     if not prices:
@@ -325,6 +352,8 @@ def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
                 if row_el:
                     row_text = page.evaluate('el => el ? el.innerText : ""', row_el)
                     val = _parse_price(row_text)
+                    print(f"  [linksme] strategy2: matched link row text {row_text[:150]!r} "
+                          f"parsed as {val}")
                     if val:
                         prices.append(val)
             except Exception:
@@ -338,12 +367,32 @@ def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
                 # Price is usually on the same line or the next few lines
                 chunk = ' '.join(lines[i:i+5])
                 val = _parse_price(chunk)
+                print(f"  [linksme] strategy3: matched line {line.strip()!r} at offset {i}, "
+                      f"chunk {chunk[:150]!r} parsed as {val}")
                 if val:
                     prices.append(val)
                 break
 
-    if debug:
-        print(f"  [linksme] prices for exact '{magazine_domain}': {prices}")
+    # Strategy 4 (fallback, logged loudly): if exact match found nothing but
+    # body text contains the domain as a substring (e.g. extra whitespace,
+    # subdomain, or different cell markup not handled above), scan all lines
+    # containing the domain and try to parse a price from a window around it.
+    if not prices and domain_lower in body_text.lower():
+        print(f"  [linksme] FALLBACK: exact-match strategies found nothing, but "
+              f"'{domain_lower}' appears as a substring in page text — scanning "
+              f"surrounding lines")
+        lines = body_text.splitlines()
+        for i, line in enumerate(lines):
+            if domain_lower in line.strip().lower():
+                chunk = ' '.join(lines[i:i+5])
+                val = _parse_price(chunk)
+                print(f"  [linksme] FALLBACK: line {line.strip()!r} at offset {i}, "
+                      f"chunk {chunk[:150]!r} parsed as {val}")
+                if val:
+                    prices.append(val)
+                    break
+
+    print(f"  [linksme] prices for '{magazine_domain}' (normalized '{domain_lower}'): {prices}")
 
     return prices
 
@@ -359,8 +408,7 @@ def get_price(magazine_domain: str, client_name: str, debug: bool = False) -> in
     # Normalize early so a full URL like "https://www.blackdown.org/" is reduced
     # to "blackdown.org" before it ever reaches the filter input or comparison logic.
     magazine_domain = _normalize_domain(magazine_domain)
-    if debug:
-        print(f"  [linksme] normalized magazine_domain → {magazine_domain!r}")
+    print(f"  [linksme] normalized magazine_domain → {magazine_domain!r}, client_name={client_name!r}")
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -415,12 +463,11 @@ def _get_price_inner(pw, browser, magazine_domain: str, client_name: str, debug:
     print(f"  [linksme] navigating to: {gp_url}")
     page.goto(gp_url, wait_until=NAV_WAIT)
     _wait(page, 2500)
-    screenshot(page, "lm_05_gp_list", debug)
+    screenshot(page, "lm_05_gp_list", True)
 
-    if debug:
-        (Path(__file__).parent / "debug_screenshots" / "lm_gp_text.txt").write_text(
-            page.inner_text("body")[:8000]
-        )
+    (Path(__file__).parent / "debug_screenshots" / "lm_gp_text.txt").write_text(
+        page.inner_text("body")[:8000]
+    )
 
     # ── 4. Filter by magazine domain ────────────────────────────────────
     _apply_domain_filter(page, magazine_domain, debug)
@@ -428,6 +475,11 @@ def _get_price_inner(pw, browser, magazine_domain: str, client_name: str, debug:
     # ── 5. Extract prices ───────────────────────────────────────────────
     prices = _extract_prices(page, magazine_domain, debug)
     if not prices:
+        print(f"  [linksme] no prices found for '{magazine_domain}' under client "
+              f"'{client_name}'")
         screenshot(page, "lm_no_prices_FAILURE", True)
+    else:
+        print(f"  [linksme] final result for '{magazine_domain}': prices={prices}, "
+              f"returning min={min(prices)}")
 
     return min(prices) if prices else None

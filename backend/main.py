@@ -1,4 +1,6 @@
 import os
+import io
+import contextlib
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -20,6 +22,7 @@ from scraper.push_notifications import send_push_to_roles    # noqa: E402
 from scraper.email_notifications import send_email_to_roles, send_retainer_email, _ROLE_EMAILS  # noqa: E402
 from scraper.bulk_price_check import check_prices_bulk                                            # noqa: E402
 from scraper.sheets_export import create_price_check_sheet                                        # noqa: E402
+from scraper import presswhizz, linksme                                                            # noqa: E402
 
 
 def _sb():
@@ -160,6 +163,45 @@ async def price_check_bulk(req: BulkPriceCheckRequest):
     except Exception as e:
         print(f"[price-check/bulk] ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _run_with_captured_logs(fn, *args, **kwargs) -> dict:
+    """Runs fn, capturing everything it prints to stdout, so callers without
+    Railway log access can see exactly what a scraper run did."""
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            value = fn(*args, **kwargs)
+        return {"value": value, "logs": buf.getvalue().splitlines(), "error": None}
+    except Exception as e:
+        return {"value": None, "logs": buf.getvalue().splitlines(), "error": str(e)}
+
+
+@app.post("/api/price-check/test")
+async def price_check_test():
+    """
+    Diagnostic endpoint: runs a single known domain ("trinituner.com") through
+    both PressWhizz and Links.me (client "mstone") and returns every log line
+    printed during the run, so selector/flow issues can be diagnosed without
+    Railway log access. Does not touch the per-article scraping flow.
+    """
+    domain = "trinituner.com"
+    client_name = "mstone"
+    print(f"[price-check/test] running diagnostic check for {domain!r}")
+
+    pw_result = await run_in_threadpool(
+        _run_with_captured_logs, presswhizz.get_price, domain, True
+    )
+    lm_result = await run_in_threadpool(
+        _run_with_captured_logs, linksme.get_price, domain, client_name, True
+    )
+
+    return {
+        "domain": domain,
+        "client_name": client_name,
+        "presswhizz": pw_result,
+        "linksme": lm_result,
+    }
 
 
 # ── Push notification endpoints ───────────────────────────────────────────────

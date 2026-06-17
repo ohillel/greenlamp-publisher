@@ -81,6 +81,7 @@ def _fill_domain_filter(page, magazine_domain: str, debug: bool):
     Fill the General Filters 'Enter Domain' / 'Portal' input with magazine_domain
     and click 'Apply Filters'.
     """
+    print(f"  [presswhizz] filling domain filter with '{magazine_domain}'")
     # The domain/portal input on PressWhizz marketplace
     domain_input = None
     for sel in [
@@ -98,18 +99,18 @@ def _fill_domain_filter(page, magazine_domain: str, debug: bool):
             el = page.query_selector(sel)
             if el and el.is_visible():
                 domain_input = el
-                if debug:
-                    print(f"  [presswhizz] domain input found via: {sel}")
+                print(f"  [presswhizz] domain input found via: {sel}")
                 break
         except Exception:
             pass
 
     if not domain_input:
-        screenshot(page, "pw_no_domain_input", debug)
-        if debug:
-            (Path(__file__).parent / "debug_screenshots" / "pw_marketplace_text.txt").write_text(
-                page.inner_text("body")[:8000]
-            )
+        print(f"  [presswhizz] FAILED to find a domain filter input — dumping visible <input> count: "
+              f"{len(page.query_selector_all('input'))}")
+        screenshot(page, "pw_no_domain_input", True)
+        (Path(__file__).parent / "debug_screenshots" / "pw_marketplace_text.txt").write_text(
+            page.inner_text("body")[:8000]
+        )
         return False
 
     domain_input.fill("")
@@ -129,16 +130,14 @@ def _fill_domain_filter(page, magazine_domain: str, debug: bool):
             if btn and btn.is_visible():
                 btn.click()
                 applied = True
-                if debug:
-                    print(f"  [presswhizz] clicked Apply via: {sel}")
+                print(f"  [presswhizz] clicked Apply via: {sel}")
                 break
         except Exception:
             pass
 
     if not applied:
         page.keyboard.press("Enter")
-        if debug:
-            print("  [presswhizz] pressed Enter to apply filter")
+        print("  [presswhizz] no Apply button found — pressed Enter to apply filter")
 
     return True
 
@@ -154,18 +153,27 @@ def _click_offers_for_domain(page, magazine_domain: str, debug: bool) -> bool:
     """
     domain_lower = magazine_domain.lower().strip()
 
+    all_rows = page.query_selector_all('tr')
+    all_links = page.query_selector_all(f'a[href*="{magazine_domain}"]')
+    print(f"  [presswhizz] results page: {len(all_rows)} <tr> rows, "
+          f"{len(all_links)} <a href> containing '{magazine_domain}'")
+
     # Strategy 1: find <a href> whose href contains the domain, walk up to row,
     # click the button with exact text "Offers"
-    for link in page.query_selector_all(f'a[href*="{magazine_domain}"]'):
+    for link in all_links:
         try:
             href = (link.get_attribute('href') or '').lower()
-            if _normalize_domain(href) != domain_lower:
+            normalized_href = _normalize_domain(href)
+            if normalized_href != domain_lower:
+                print(f"  [presswhizz] strategy1: href '{href}' normalizes to "
+                      f"'{normalized_href}' — does not match '{domain_lower}', skipping")
                 continue
             row_el = link.evaluate_handle(
                 'el => el.closest("tr") || el.closest("[class*=row]") || '
                 'el.closest("[class*=item]") || el.closest("[class*=card]") || el.parentElement'
             )
             if not row_el:
+                print(f"  [presswhizz] strategy1: matched href '{href}' but found no containing row")
                 continue
             offers_el = row_el.evaluate_handle(
                 '''el => {
@@ -180,53 +188,80 @@ def _click_offers_for_domain(page, magazine_domain: str, debug: bool) -> bool:
             if offers_el:
                 try:
                     offers_el.click()
-                    if debug:
-                        print(f"  [presswhizz] clicked Offers via href match for {href}")
+                    print(f"  [presswhizz] clicked Offers via href match for {href}")
                     return True
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"  [presswhizz] strategy1: found Offers button but click failed: {e}")
+            else:
+                row_text = page.evaluate('el => el ? el.innerText : ""', row_el)
+                print(f"  [presswhizz] strategy1: matched row for '{href}' but no exact-text "
+                      f"'Offers' button inside it. Row text: {row_text[:200]!r}")
         except Exception as e:
-            if debug:
-                print(f"  [presswhizz] strategy1 error: {e}")
+            print(f"  [presswhizz] strategy1 error: {e}")
 
     # Strategy 2: <tr>/<td> — match Portal cell by inner_text (text-based tables)
-    for row in page.query_selector_all('tr'):
+    checked_texts = []
+    for row in all_rows:
         cells = row.query_selector_all('td')
         if not cells:
             continue
         try:
             link = cells[0].query_selector('a')
             raw = link.inner_text() if link else cells[0].inner_text()
-            if _normalize_domain(raw) != domain_lower:
+            normalized_raw = _normalize_domain(raw)
+            checked_texts.append(normalized_raw)
+            if normalized_raw != domain_lower:
                 continue
             btn = row.query_selector('button:has-text("Offers")')
             if btn:
                 btn.click()
-                if debug:
-                    print(f"  [presswhizz] clicked Offers via <tr> text match")
+                print(f"  [presswhizz] clicked Offers via <tr> text match (cell text: {raw!r})")
                 return True
+            else:
+                print(f"  [presswhizz] strategy2: row text '{raw}' matches domain but no "
+                      f"'Offers' button found in that row")
         except Exception:
             pass
+    if checked_texts:
+        print(f"  [presswhizz] strategy2: first-cell texts seen across rows: {checked_texts[:20]}")
 
     # Strategy 3: single result — click the only <button> whose exact text is "Offers"
     # (the filter already scoped results to this domain, so there should be just one)
     exact_btns = page.query_selector_all('button')
+    offer_like_texts = []
     for btn in exact_btns:
         try:
-            if btn.inner_text().strip() == "Offers" and btn.is_visible():
+            text = btn.inner_text().strip()
+        except Exception:
+            continue
+        if 'offer' in text.lower():
+            offer_like_texts.append(text)
+        if text == "Offers" and btn.is_visible():
+            btn.click()
+            print(f"  [presswhizz] clicked sole Offers button (exact text)")
+            return True
+
+    # Strategy 4 (fallback, logged loudly): click any visible button whose text
+    # merely *contains* "offer" (case-insensitive) — covers label changes like
+    # "View Offers" / "See Offers" without silently widening the exact-match
+    # strategies above.
+    for btn in exact_btns:
+        try:
+            text = btn.inner_text().strip()
+            if 'offer' in text.lower() and btn.is_visible():
                 btn.click()
-                if debug:
-                    print(f"  [presswhizz] clicked sole Offers button (exact text)")
+                print(f"  [presswhizz] FALLBACK: clicked button with partial text match {text!r} "
+                      f"(exact 'Offers' text not found — site label may have changed)")
                 return True
         except Exception:
             pass
 
-    screenshot(page, "pw_no_offers_btn", debug)
-    if debug:
-        print(f"  [presswhizz] could not find Offers button for '{magazine_domain}'")
-        (Path(__file__).parent / "debug_screenshots" / "pw_results_text.txt").write_text(
-            page.inner_text("body")[:8000]
-        )
+    print(f"  [presswhizz] could not find any Offers button for '{magazine_domain}'. "
+          f"Buttons containing 'offer': {offer_like_texts[:20]}")
+    screenshot(page, "pw_no_offers_btn", True)
+    (Path(__file__).parent / "debug_screenshots" / "pw_results_text.txt").write_text(
+        page.inner_text("body")[:8000]
+    )
     return False
 
 
@@ -248,14 +283,14 @@ def _extract_guest_post_prices(page, debug: bool) -> list[int]:
     We read the full page text, slice the offers block, and parse Guest Post lines.
     """
     _wait(page, 2000)
-    screenshot(page, "pw_06_offers_popup", debug)
+    screenshot(page, "pw_06_offers_popup", True)
 
     full_text = page.inner_text("body")
+    print(f"  [presswhizz] offers popup: page text is {len(full_text)} chars")
 
-    if debug:
-        (Path(__file__).parent / "debug_screenshots" / "pw_popup_text.txt").write_text(
-            full_text[-5000:]
-        )
+    (Path(__file__).parent / "debug_screenshots" / "pw_popup_text.txt").write_text(
+        full_text[-5000:]
+    )
 
     prices: list[int] = []
     lines = full_text.splitlines()
@@ -268,33 +303,38 @@ def _extract_guest_post_prices(page, debug: bool) -> list[int]:
             break
 
     if panel_start is None:
-        if debug:
-            print("  [presswhizz] 'Offers for:' marker not found in page text — panel may not have opened")
+        print("  [presswhizz] 'Offers for:' marker not found in page text — panel may not have "
+              f"opened. Last 600 chars of page text: {full_text[-600:]!r}")
         return prices
 
     # Take everything from "Offers for:" onward (max 200 lines)
     panel_lines = lines[panel_start:panel_start + 200]
-
-    if debug:
-        print(f"  [presswhizz] offers panel: {len(panel_lines)} lines")
+    print(f"  [presswhizz] offers panel found at line {panel_start}, scanning {len(panel_lines)} lines")
 
     # Scan panel lines: find each "Guest Post" offer row and read its price
+    guest_post_lines_found = 0
     i = 0
     while i < len(panel_lines):
         line = panel_lines[i].strip()
         # Lines starting with "Guest Post" are offer type rows
         if re.match(r'guest post', line, re.IGNORECASE):
+            guest_post_lines_found += 1
             # Rules text spans several lines before the price; use a wide window
             chunk = '\t'.join(panel_lines[i:i + 15])
+            matched_val = None
             for m in _PRICE_RE.finditer(chunk):
                 val = _parse_price_from_match(m)
                 if val:
+                    matched_val = val
                     prices.append(val)
                     break
+            if matched_val is None:
+                print(f"  [presswhizz] 'Guest Post' line at offset {i} had no parsable price. "
+                      f"Chunk: {chunk[:200]!r}")
         i += 1
 
-    if debug:
-        print(f"  [presswhizz] Guest Post prices from popup: {prices}")
+    print(f"  [presswhizz] found {guest_post_lines_found} 'Guest Post' line(s), "
+          f"extracted prices: {prices}")
 
     return prices
 
