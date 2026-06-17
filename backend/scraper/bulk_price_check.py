@@ -2,7 +2,7 @@
 Bulk price checker used by Or's "Price Check" tool.
 
 Given an arbitrary pasted list of URLs/domains, fetches PressWhizz +
-Links.me prices for each (Links.me always looked up under the "mstone"
+Links.me prices for each (Links.me always looked up under the "apiiro"
 catalog, since these are ad-hoc lookups not tied to a specific client).
 Does not touch the per-article scraping flow in prices.py.
 
@@ -14,7 +14,7 @@ null. One site at a time is slower (~30-60s each) but reliable.
 from .prices import fetch_prices
 from .linksme import _normalize_domain
 
-DEFAULT_LINKSME_CLIENT = "mstone"
+DEFAULT_LINKSME_CLIENT = "apiiro"
 
 
 def check_prices_bulk(urls: list[str]) -> list[dict]:

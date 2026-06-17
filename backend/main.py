@@ -260,9 +260,16 @@ async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> 
     """
     sb = _sb()
     try:
-        print(f"[bg_prices] fetching for article {article_id} ({magazine!r}, {client_name!r})")
+        # Links.me's catalog is shared across all projects, so the actual
+        # client_name (e.g. "converge") rarely matches a real Links.me
+        # project and would return null. "apiiro" has the largest catalog,
+        # so it's used as the Links.me lookup project regardless of the
+        # article's real client.
+        linksme_client_name = "apiiro"
+        print(f"[bg_prices] fetching for article {article_id} ({magazine!r}, "
+              f"client_name={client_name!r}, linksme_client_name={linksme_client_name!r})")
         async with _PRICE_FETCH_SEMAPHORE:
-            result = await run_in_threadpool(fetch_prices, magazine, client_name)
+            result = await run_in_threadpool(fetch_prices, magazine, linksme_client_name)
         errors = result.get("errors")
         sb.from_("articles").update({
             "price_presswhizz":  result.get("presswhizz"),
