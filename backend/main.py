@@ -1,5 +1,6 @@
 import os
 import io
+import asyncio
 import contextlib
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -240,6 +241,14 @@ async def push_subscribe(req: PushSubscribeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Each price fetch spawns 2 headless Playwright browsers (PressWhizz +
+# Links.me). Railway's resources get exhausted when several articles are
+# submitted at once and all their fetches run concurrently — this caps how
+# many _bg_fetch_prices calls actually run at the same time; the rest queue
+# and run as slots free up.
+_PRICE_FETCH_SEMAPHORE = asyncio.Semaphore(2)
+
+
 async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> None:
     """
     Fetch prices in the background (after submission) and save them to the
@@ -252,7 +261,8 @@ async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> 
     sb = _sb()
     try:
         print(f"[bg_prices] fetching for article {article_id} ({magazine!r}, {client_name!r})")
-        result = await run_in_threadpool(fetch_prices, magazine, client_name)
+        async with _PRICE_FETCH_SEMAPHORE:
+            result = await run_in_threadpool(fetch_prices, magazine, client_name)
         errors = result.get("errors")
         sb.from_("articles").update({
             "price_presswhizz":  result.get("presswhizz"),
