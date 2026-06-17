@@ -4,6 +4,14 @@ Orchestrator: fetch prices from both PressWhizz and Links.me concurrently.
 import concurrent.futures
 from . import presswhizz, linksme
 
+# Hard ceiling per site. Native threads can't be force-killed once started,
+# but bounding future.result() ensures fetch_prices() — and therefore the
+# /api/prices request and the background task that calls it — always returns
+# within this window instead of hanging the spinner forever. Any thread still
+# running past this point keeps going in the background and is abandoned;
+# its result is simply not waited for.
+PER_SITE_TIMEOUT_SECONDS = 60
+
 
 def fetch_prices(magazine_domain: str, client_name: str, debug: bool = False) -> dict:
     """
@@ -28,7 +36,10 @@ def fetch_prices(magazine_domain: str, client_name: str, debug: bool = False) ->
 
         for site, future in [("presswhizz", pw_future), ("linksme", lm_future)]:
             try:
-                result[site] = future.result()
+                result[site] = future.result(timeout=PER_SITE_TIMEOUT_SECONDS)
+            except concurrent.futures.TimeoutError:
+                result["errors"][site] = f"timed out after {PER_SITE_TIMEOUT_SECONDS}s"
+                print(f"  [{site}] ERROR: timed out after {PER_SITE_TIMEOUT_SECONDS}s")
             except Exception as e:
                 result["errors"][site] = str(e)
                 print(f"  [{site}] ERROR: {e}")

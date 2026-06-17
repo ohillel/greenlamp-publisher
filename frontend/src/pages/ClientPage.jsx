@@ -392,7 +392,7 @@ export default function ClientPage() {
       preferred_publisher:   editingDeniseData.preferred_publisher   || null,
       custom_publisher_note: editingDeniseData.custom_publisher_note || null,
       // Clear stale prices when magazine changes so the new fetch is authoritative
-      ...(magazineChanged ? { price_presswhizz: null, price_linksme: null } : {}),
+      ...(magazineChanged ? { price_presswhizz: null, price_linksme: null, prices_checked_at: null, price_fetch_error: null } : {}),
     }).eq('id', id)
 
     if (!error) {
@@ -401,7 +401,7 @@ export default function ClientPage() {
           ? {
               ...a,
               ...editingDeniseData,
-              ...(magazineChanged ? { price_presswhizz: null, price_linksme: null } : {}),
+              ...(magazineChanged ? { price_presswhizz: null, price_linksme: null, prices_checked_at: null, price_fetch_error: null } : {}),
             }
           : a
       ))
@@ -930,6 +930,7 @@ export default function ClientPage() {
           const pricesLoading = !isOther && article.status === 'submitted'
             && article.price_presswhizz == null
             && article.price_linksme    == null
+            && !article.prices_checked_at
           return (
             <div key={article.id} id={`article-card-${article.id}`} className={`article-card ${isEditing ? 'editing' : ''}`}>
               <div className="card-header">
@@ -994,14 +995,18 @@ export default function ClientPage() {
                           <span className="cf-label">PressWhizz price</span>
                           {isEditing
                             ? <input name="price_presswhizz" type="number" value={editData.price_presswhizz} onChange={handleEditChange} className="edit-input" placeholder="₪" />
-                            : <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
+                            : <span className="price-val" title={article.price_fetch_error || ''}>
+                                {fmtPrice(article.price_presswhizz) ?? (article.prices_checked_at ? 'Price unavailable' : '—')}
+                              </span>
                           }
                         </div>
                         <div className="card-field">
                           <span className="cf-label">Links.me price</span>
                           {isEditing
                             ? <input name="price_linksme" type="number" value={editData.price_linksme} onChange={handleEditChange} className="edit-input" placeholder="₪" />
-                            : <span className="price-val">{fmtPrice(article.price_linksme)}</span>
+                            : <span className="price-val" title={article.price_fetch_error || ''}>
+                                {fmtPrice(article.price_linksme) ?? (article.prices_checked_at ? 'Price unavailable' : '—')}
+                              </span>
                           }
                         </div>
                       </>

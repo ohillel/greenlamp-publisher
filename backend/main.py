@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -162,18 +163,35 @@ async def push_subscribe(req: PushSubscribeRequest):
 
 
 async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> None:
-    """Fetch prices in the background (after submission) and save them to the article row."""
+    """
+    Fetch prices in the background (after submission) and save them to the
+    article row. prices_checked_at is always stamped on completion (success
+    OR failure) so the frontend can tell "still fetching" (null timestamp)
+    apart from "fetch finished, nothing found" (timestamp set, prices null) —
+    without it, a failed fetch looks identical to one still in progress and
+    the spinner never goes away.
+    """
+    sb = _sb()
     try:
         print(f"[bg_prices] fetching for article {article_id} ({magazine!r}, {client_name!r})")
         result = await run_in_threadpool(fetch_prices, magazine, client_name)
-        sb = _sb()
+        errors = result.get("errors")
         sb.from_("articles").update({
-            "price_presswhizz": result.get("presswhizz"),
-            "price_linksme":    result.get("linksme"),
+            "price_presswhizz":  result.get("presswhizz"),
+            "price_linksme":     result.get("linksme"),
+            "prices_checked_at": datetime.now(timezone.utc).isoformat(),
+            "price_fetch_error": "; ".join(f"{k}: {v}" for k, v in errors.items()) if errors else None,
         }).eq("id", article_id).execute()
-        print(f"[bg_prices] saved — pw={result.get('presswhizz')} lm={result.get('linksme')}")
+        print(f"[bg_prices] saved — pw={result.get('presswhizz')} lm={result.get('linksme')} errors={errors}")
     except Exception as e:
         print(f"[bg_prices] ERROR for article {article_id}: {e}")
+        try:
+            sb.from_("articles").update({
+                "prices_checked_at": datetime.now(timezone.utc).isoformat(),
+                "price_fetch_error": str(e),
+            }).eq("id", article_id).execute()
+        except Exception as e2:
+            print(f"[bg_prices] failed to record error for article {article_id}: {e2}")
 
 
 class NotifyRequest(BaseModel):

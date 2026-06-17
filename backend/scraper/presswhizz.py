@@ -15,8 +15,8 @@ Flow:
 import os
 import re
 from pathlib import Path
-from playwright.sync_api import sync_playwright
-from .browser import save_session, load_session_kwargs, screenshot
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from .browser import save_session, load_session_kwargs, clear_session, apply_default_timeouts, screenshot
 
 BASE_URL  = "https://app.presswhizz.com"
 LOGIN_URL = f"{BASE_URL}/login"
@@ -302,51 +302,75 @@ def _extract_guest_post_prices(page, debug: bool) -> list[int]:
 def get_price(magazine_domain: str, debug: bool = False) -> int | None:
     """
     Returns the lowest Guest Post price for magazine_domain on PressWhizz,
-    or None if not found.
+    or None if not found. Always closes the browser, even on error, so a
+    failed run doesn't leak Chromium processes into the next run.
     """
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        kwargs  = load_session_kwargs("presswhizz")
-        context = browser.new_context(**kwargs)
-        page    = context.new_page()
+        try:
+            return _get_price_inner(pw, browser, magazine_domain, debug)
+        finally:
+            try:
+                browser.close()
+            except Exception:
+                pass
 
-        # ── 1. Navigate to app ──────────────────────────────────────────────
-        page.goto(BASE_URL, wait_until=NAV_WAIT)
-        _wait(page, 2000)
-        screenshot(page, "pw_00_home", debug)
 
-        if _is_on_login(page):
+def _get_price_inner(pw, browser, magazine_domain: str, debug: bool, retried_login: bool = False) -> int | None:
+    kwargs  = load_session_kwargs("presswhizz")
+    context = browser.new_context(**kwargs)
+    page    = context.new_page()
+    apply_default_timeouts(context, page)
+
+    # ── 1. Navigate to app ──────────────────────────────────────────────
+    page.goto(BASE_URL, wait_until=NAV_WAIT)
+    _wait(page, 2000)
+    screenshot(page, "pw_00_home", debug)
+
+    if _is_on_login(page):
+        try:
             _login(page, debug)
-            save_session(context, "presswhizz")
+        except (RuntimeError, PlaywrightTimeoutError) as e:
+            # Session may have been a stale/corrupt cookie jar — clear it and
+            # retry once with a guaranteed-fresh login before giving up.
+            if not retried_login:
+                print(f"  [presswhizz] login failed ({e}) — clearing session and retrying once")
+                clear_session("presswhizz")
+                context.close()
+                return _get_price_inner(pw, browser, magazine_domain, debug, retried_login=True)
+            raise
+        save_session(context, "presswhizz")
 
-        # ── 2. Go to Marketplace ────────────────────────────────────────────
-        page.goto(f"{BASE_URL}/marketplace", wait_until=NAV_WAIT)
-        _wait(page, 2500)
-        screenshot(page, "pw_01_marketplace", debug)
+    # ── 2. Go to Marketplace ────────────────────────────────────────────
+    page.goto(f"{BASE_URL}/marketplace", wait_until=NAV_WAIT)
+    _wait(page, 2500)
+    screenshot(page, "pw_01_marketplace", debug)
 
-        # ── 3. Fill domain in General Filters ──────────────────────────────
-        filled = _fill_domain_filter(page, magazine_domain, debug)
-        if not filled:
-            raise RuntimeError(
-                f"PressWhizz: could not find domain filter input on marketplace. "
-                f"Check debug screenshots."
-            )
+    # ── 3. Fill domain in General Filters ──────────────────────────────
+    filled = _fill_domain_filter(page, magazine_domain, debug)
+    if not filled:
+        screenshot(page, "pw_no_domain_input_FAILURE", True)
+        raise RuntimeError(
+            f"PressWhizz: could not find domain filter input on marketplace. "
+            f"Check debug screenshots."
+        )
 
-        screenshot(page, "pw_02_filter_filled", debug)
+    screenshot(page, "pw_02_filter_filled", debug)
 
-        # Press Enter to trigger search / wait for results
-        page.keyboard.press("Enter")
-        _wait(page, 3500)
-        screenshot(page, "pw_03_results", debug)
+    # Press Enter to trigger search / wait for results
+    page.keyboard.press("Enter")
+    _wait(page, 3500)
+    screenshot(page, "pw_03_results", debug)
 
-        # ── 4. Click "Offers" on the matching row ───────────────────────────
-        found = _click_offers_for_domain(page, magazine_domain, debug)
-        if not found:
-            browser.close()
-            return None
+    # ── 4. Click "Offers" on the matching row ───────────────────────────
+    found = _click_offers_for_domain(page, magazine_domain, debug)
+    if not found:
+        screenshot(page, "pw_no_offers_btn_FAILURE", True)
+        return None
 
-        # ── 5. Extract Guest Post prices from popup ─────────────────────────
-        prices = _extract_guest_post_prices(page, debug)
+    # ── 5. Extract Guest Post prices from popup ─────────────────────────
+    prices = _extract_guest_post_prices(page, debug)
+    if not prices:
+        screenshot(page, "pw_no_prices_FAILURE", True)
 
-        browser.close()
-        return min(prices) if prices else None
+    return min(prices) if prices else None

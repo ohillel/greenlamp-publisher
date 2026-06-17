@@ -92,3 +92,11 @@ ALTER TABLE articles ADD COLUMN IF NOT EXISTS assigned_to TEXT;
 -- ── Migration: add custom_publisher_note column ──────────────────────────────
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS custom_publisher_note TEXT;
 -- Free-text destination for "Other" publisher articles (e.g. "Outreach.io")
+
+-- ── Migration: add price fetch tracking columns ──────────────────────────────
+-- prices_checked_at is set once the background price fetch completes, whether
+-- or not it found a price. The frontend uses this to distinguish "still
+-- fetching" (show spinner) from "fetch finished, no price found" (show
+-- "Price unavailable") instead of spinning forever.
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS prices_checked_at TIMESTAMPTZ;
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS price_fetch_error TEXT;

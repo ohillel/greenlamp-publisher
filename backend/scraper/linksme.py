@@ -13,8 +13,8 @@ Flow:
 import os
 import re
 from pathlib import Path
-from playwright.sync_api import sync_playwright
-from .browser import save_session, load_session_kwargs, screenshot
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from .browser import save_session, load_session_kwargs, clear_session, apply_default_timeouts, screenshot
 
 BASE_URL  = "https://app.links.me"
 LOGIN_URL = f"{BASE_URL}/login"
@@ -364,48 +364,70 @@ def get_price(magazine_domain: str, client_name: str, debug: bool = False) -> in
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        kwargs  = load_session_kwargs("linksme")
-        context = browser.new_context(**kwargs)
-        page    = context.new_page()
+        try:
+            return _get_price_inner(pw, browser, magazine_domain, client_name, debug)
+        finally:
+            try:
+                browser.close()
+            except Exception:
+                pass
 
-        # ── 1. Navigate to app ──────────────────────────────────────────────
-        page.goto(BASE_URL, wait_until=NAV_WAIT)
-        _wait(page, 2000)
-        screenshot(page, "lm_00_home", debug)
 
-        if _is_on_login(page):
+def _get_price_inner(pw, browser, magazine_domain: str, client_name: str, debug: bool, retried_login: bool = False) -> int | None:
+    kwargs  = load_session_kwargs("linksme")
+    context = browser.new_context(**kwargs)
+    page    = context.new_page()
+    apply_default_timeouts(context, page)
+
+    # ── 1. Navigate to app ──────────────────────────────────────────────
+    page.goto(BASE_URL, wait_until=NAV_WAIT)
+    _wait(page, 2000)
+    screenshot(page, "lm_00_home", debug)
+
+    if _is_on_login(page):
+        try:
             _login(page, debug)
-            save_session(context, "linksme")
+        except (RuntimeError, PlaywrightTimeoutError) as e:
+            # Session may have been a stale/corrupt cookie jar — clear it and
+            # retry once with a guaranteed-fresh login before giving up.
+            if not retried_login:
+                print(f"  [linksme] login failed ({e}) — clearing session and retrying once")
+                clear_session("linksme")
+                context.close()
+                return _get_price_inner(pw, browser, magazine_domain, client_name, debug, retried_login=True)
+            raise
+        save_session(context, "linksme")
 
-        # ── 2. Find project matching client_name ────────────────────────────
+    # ── 2. Find project matching client_name ────────────────────────────
+    gp_url = _find_guest_posting_url(page, client_name, debug)
+
+    if not gp_url:
+        page.goto(f"{BASE_URL}/dashboard", wait_until=NAV_WAIT)
+        _wait(page, 2000)
         gp_url = _find_guest_posting_url(page, client_name, debug)
 
-        if not gp_url:
-            page.goto(f"{BASE_URL}/dashboard", wait_until=NAV_WAIT)
-            _wait(page, 2000)
-            gp_url = _find_guest_posting_url(page, client_name, debug)
+    if not gp_url:
+        print(f"  [linksme] no project found for '{client_name}'")
+        screenshot(page, "lm_no_project_FAILURE", True)
+        return None
 
-        if not gp_url:
-            print(f"  [linksme] no project found for '{client_name}'")
-            browser.close()
-            return None
+    # ── 3. Navigate to Guest Posting Sites List ─────────────────────────
+    print(f"  [linksme] navigating to: {gp_url}")
+    page.goto(gp_url, wait_until=NAV_WAIT)
+    _wait(page, 2500)
+    screenshot(page, "lm_05_gp_list", debug)
 
-        # ── 3. Navigate to Guest Posting Sites List ─────────────────────────
-        print(f"  [linksme] navigating to: {gp_url}")
-        page.goto(gp_url, wait_until=NAV_WAIT)
-        _wait(page, 2500)
-        screenshot(page, "lm_05_gp_list", debug)
+    if debug:
+        (Path(__file__).parent / "debug_screenshots" / "lm_gp_text.txt").write_text(
+            page.inner_text("body")[:8000]
+        )
 
-        if debug:
-            (Path(__file__).parent / "debug_screenshots" / "lm_gp_text.txt").write_text(
-                page.inner_text("body")[:8000]
-            )
+    # ── 4. Filter by magazine domain ────────────────────────────────────
+    _apply_domain_filter(page, magazine_domain, debug)
 
-        # ── 4. Filter by magazine domain ────────────────────────────────────
-        _apply_domain_filter(page, magazine_domain, debug)
+    # ── 5. Extract prices ───────────────────────────────────────────────
+    prices = _extract_prices(page, magazine_domain, debug)
+    if not prices:
+        screenshot(page, "lm_no_prices_FAILURE", True)
 
-        # ── 5. Extract prices ───────────────────────────────────────────────
-        prices = _extract_prices(page, magazine_domain, debug)
-
-        browser.close()
-        return min(prices) if prices else None
+    return min(prices) if prices else None
