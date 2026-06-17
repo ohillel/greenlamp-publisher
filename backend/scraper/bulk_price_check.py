@@ -16,7 +16,7 @@ from .prices import fetch_prices
 from .linksme import _normalize_domain
 
 DEFAULT_LINKSME_CLIENT = "apiiro"
-BATCH_SIZE = 3
+BATCH_SIZE = 2
 
 
 def _check_one(u: str, domain: str) -> dict:
