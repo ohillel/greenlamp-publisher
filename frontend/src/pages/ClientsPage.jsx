@@ -238,6 +238,11 @@ export default function ClientsPage() {
   const [exportCountry,   setExportCountry]    = useState('all')
   const [exportMonthOpts, setExportMonthOpts]  = useState([])  // [{value:'2026-05', label:'May 2026'}]
 
+  // ── Pending publication (Or-only read-only tracker) ─────────────────────────
+
+  const [pendingPubOpen,     setPendingPubOpen]     = useState(false)
+  const [pendingPubArticles, setPendingPubArticles] = useState([])
+
   // Fetch distinct published months for the dropdown
   useEffect(() => {
     if (role !== 'or') return
@@ -260,6 +265,30 @@ export default function ClientsPage() {
         setExportMonthOpts(opts)
       })
   }, [role])
+
+  // Fetch all articles awaiting publication (status = sent_to_publisher), oldest first
+  const refreshPendingPub = useCallback(async () => {
+    if (role !== 'or') return
+    const { data } = await supabase
+      .from('articles')
+      .select('id, client_id, status, created_at, updated_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, price_presswhizz, price_linksme, clients(name)')
+      .eq('status', 'sent_to_publisher')
+      .order('updated_at', { ascending: true })
+    setPendingPubArticles(data ?? [])
+  }, [role])
+
+  useEffect(() => { if (pendingPubOpen) refreshPendingPub() }, [pendingPubOpen, refreshPendingPub])
+
+  useEffect(() => {
+    if (role !== 'or') return
+    const channel = supabase
+      .channel('articles-pending-pub')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'articles' }, () => {
+        if (pendingPubOpen) refreshPendingPub()
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [role, pendingPubOpen, refreshPendingPub])
 
   const exportToExcel = async () => {
     setExporting(true)
@@ -650,6 +679,13 @@ export default function ClientsPage() {
                 >
                   {exporting ? 'Exporting…' : '↓ Export to Excel'}
                 </button>
+                <button
+                  className="btn-ghost"
+                  onClick={() => setPendingPubOpen(prev => !prev)}
+                  style={pendingPubOpen ? { background: '#16a34a', color: '#fff', borderColor: '#16a34a' } : undefined}
+                >
+                  Pending publication
+                </button>
               </div>
             )}
             <div className="clients-search-wrap">
@@ -710,8 +746,59 @@ export default function ClientsPage() {
 
       {loading && <div className="loading-inline">Loading…</div>}
 
+      {/* ── Pending publication tracker (Or-only) ── */}
+      {!loading && role === 'or' && pendingPubOpen && (
+        <div style={{ marginBottom: 24 }}>
+          <table className="pending-articles-table" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Client</th>
+                <th>Publisher</th>
+                <th>Submitted by Denise</th>
+                <th>Sent to publisher</th>
+                <th>Doc</th>
+                <th>Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingPubArticles.length === 0 ? (
+                <tr><td colSpan={7} style={{ textAlign: 'center', color: '#6b7280', padding: 16 }}>No articles currently with the publisher.</td></tr>
+              ) : pendingPubArticles.map((article, i) => {
+                const effPub = article.chosen_publisher || article.preferred_publisher
+                const price  = effPub === 'presswhizz' ? article.price_presswhizz
+                             : effPub === 'linksme'     ? article.price_linksme
+                             : null
+                return (
+                  <tr
+                    key={article.id}
+                    className="pending-article-row"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => navigate(`/clients/${article.client_id}?article=${article.id}`)}
+                  >
+                    <td className="col-num">{i + 1}</td>
+                    <td className="col-client">{article.clients?.name ?? '—'}</td>
+                    <td className="col-publisher">
+                      <span className={effPub ? 'pub-tag' : 'cf-empty'}>{PUB_LABEL[effPub] ?? '—'}</span>
+                    </td>
+                    <td className="col-date">{fmtDate(article.created_at)}</td>
+                    <td className="col-date">{fmtDate(article.updated_at)}</td>
+                    <td className="col-doc">
+                      {article.google_doc_url
+                        ? <a href={article.google_doc_url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="doc-link">Doc ↗</a>
+                        : <span className="cf-empty">—</span>}
+                    </td>
+                    <td className="col-prices">{price != null ? fmtPrice(price) : <span className="cf-empty">—</span>}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* ── Magazine search results ── */}
-      {!loading && magSelected && (() => {
+      {!loading && !pendingPubOpen && magSelected && (() => {
         // Derive sorted month list from results
         const magMonths = (() => {
           const seen = new Set()
@@ -805,8 +892,8 @@ export default function ClientsPage() {
         )
       })()}
 
-      {/* ── Role-based layouts (hidden while magazine search is active) ── */}
-      {!loading && !magSelected && <>
+      {/* ── Role-based layouts (hidden while magazine search or pending-publication is active) ── */}
+      {!loading && !magSelected && !pendingPubOpen && <>
 
       {/* ── Or layout ── */}
       {role === 'or' && pendingArticles.length === 0 && (
