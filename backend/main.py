@@ -19,7 +19,6 @@ from scraper.prices import fetch_prices                      # noqa: E402
 from scraper.status_checker import run_status_check          # noqa: E402
 from scraper.gmail_checker import check_gmail_notifications  # noqa: E402
 from scraper.reminder_checker import check_stale_articles    # noqa: E402
-from scraper.push_notifications import send_push_to_roles    # noqa: E402
 from scraper.email_notifications import send_email_to_roles, send_retainer_email, _ROLE_EMAILS  # noqa: E402
 from scraper.bulk_price_check import check_prices_bulk                                            # noqa: E402
 from scraper.sheets_export import create_price_check_sheet                                        # noqa: E402
@@ -156,7 +155,12 @@ async def price_check_bulk(req: BulkPriceCheckRequest):
         raise HTTPException(status_code=422, detail="urls must contain at least one entry")
     print(f"[price-check/bulk] checking {len(urls)} url(s)")
     try:
-        results = await run_in_threadpool(check_prices_bulk, urls)
+        # Shares _PRICE_FETCH_SEMAPHORE with _bg_fetch_prices so the two
+        # never run more than 2 concurrent Playwright sessions combined —
+        # otherwise simultaneous bg_fetch_prices + bulk price checks exhaust
+        # Railway's memory and crash Chromium.
+        async with _PRICE_FETCH_SEMAPHORE:
+            results = await run_in_threadpool(check_prices_bulk, urls)
         print(f"[price-check/bulk] fetched prices, creating sheet…")
         sheet_url = await run_in_threadpool(create_price_check_sheet, results)
         print(f"[price-check/bulk] sheet created: {sheet_url}")
@@ -420,6 +424,58 @@ async def manual_gmail_check():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _send_push_to_roles_with_cleanup(sb, roles: list[str], title: str, body: str) -> None:
+    """
+    Same as scraper.push_notifications.send_push_to_roles, but additionally
+    deletes a subscription from push_subscriptions when delivery fails with
+    410 Gone (subscription expired/revoked on the browser's push service),
+    so we stop retrying dead endpoints on every future notification.
+    """
+    from scraper.push_notifications import send_push
+    from pywebpush import WebPushException
+
+    print(f"[push] send_push_to_roles: roles={roles!r} title={title!r} body={body!r}")
+    try:
+        profiles_res = sb.from_("profiles").select("id").in_("role", roles).execute()
+        user_ids = [r["id"] for r in (profiles_res.data or [])]
+        print(f"[push] found {len(user_ids)} profile(s) for roles {roles!r}: {user_ids}")
+        if not user_ids:
+            print(f"[push] no users found for roles {roles!r} — check profiles table role values")
+            return
+
+        subs_res = (
+            sb.from_("push_subscriptions")
+            .select("endpoint, subscription")
+            .in_("user_id", user_ids)
+            .execute()
+        )
+        rows = subs_res.data or []
+        print(f"[push] found {len(rows)} subscription(s) for {len(user_ids)} user(s)")
+        if not rows:
+            print(f"[push] no subscriptions saved — user(s) have not subscribed yet")
+    except Exception as e:
+        print(f"[push] error fetching subscriptions: {e}")
+        return
+
+    for row in rows:
+        sub = row.get("subscription") or {}
+        endpoint = row.get("endpoint") or sub.get("endpoint") or ""
+        try:
+            send_push(sub, title, body)
+            print(f"[push] delivered OK → {endpoint[:60]}…")
+        except WebPushException as e:
+            status_code = e.response.status_code if e.response else None
+            print(f"[push] delivery failed ({status_code}): {e}")
+            if status_code == 410 and endpoint:
+                try:
+                    sb.from_("push_subscriptions").delete().eq("endpoint", endpoint).execute()
+                    print(f"[push] deleted expired subscription → {endpoint[:60]}…")
+                except Exception as e2:
+                    print(f"[push] failed to delete expired subscription: {e2}")
+        except Exception as e:
+            print(f"[push] unexpected error: {e}")
+
+
 @app.post("/api/notify")
 async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
     """Send a push notification to the appropriate roles for a status-change event."""
@@ -436,7 +492,7 @@ async def notify(req: NotifyRequest, background_tasks: BackgroundTasks):
     title = "Greenlamp Publisher"
     try:
         sb = _sb()
-        await run_in_threadpool(send_push_to_roles, sb, roles, title, body)
+        await run_in_threadpool(_send_push_to_roles_with_cleanup, sb, roles, title, body)
 
         # Build the deep link directly to the article card
         deep_link: str | None = None
