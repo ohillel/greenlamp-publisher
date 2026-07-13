@@ -31,11 +31,22 @@ const sendNotify = (event, clientName, magazine, reason, articleId, clientId) =>
 }
 
 const PUBLISHERS = [
-  { value: 'presswhizz', label: 'PressWhizz' },
-  { value: 'linksme',    label: 'Links.me'   },
-  { value: 'other',      label: 'Other'      },
+  { value: 'presswhizz',   label: 'PressWhizz'      },
+  { value: 'linksme',      label: 'Links.me'         },
+  { value: 'collaborator', label: 'Collaborator.pro' },
+  { value: 'prnews',       label: 'PRnews.io'        },
+  { value: 'other',        label: 'Other'            },
 ]
-const PUB_LABEL = { presswhizz: 'PressWhizz', linksme: 'Links.me', other: 'Other' }
+const PUB_LABEL = {
+  presswhizz:   'PressWhizz',
+  linksme:      'Links.me',
+  collaborator: 'Collaborator.pro',
+  prnews:       'PRnews.io',
+  other:        'Other',
+}
+// Publishers that behave like "Other": no automatic price fetching,
+// manual publish tracking, Assign to Denise / Handle myself buttons.
+const isOtherPub = pub => ['other', 'collaborator', 'prnews'].includes(pub)
 
 const EMPTY_FORM = { google_doc_url: '', magazine: '', preferred_publisher: '', custom_publisher_note: '' }
 const EMPTY_EDIT = {
@@ -53,7 +64,7 @@ function DeniseArticleCard({
   onMarkSent, markingSent,
 }) {
   const isDraft       = article.status === 'draft'
-  const isOtherAssigned = article.preferred_publisher === 'other' && article.assigned_to === 'denise'
+  const isOtherAssigned = isOtherPub(article.preferred_publisher) && article.assigned_to === 'denise'
     && article.status === 'approved'
   // Confirm is available once the required fields are filled — no price check needed
   const canConfirm = isDraft && !!article.magazine && !!article.preferred_publisher && !isEditing
@@ -81,7 +92,7 @@ function DeniseArticleCard({
             </div>
             <div className="denise-edit-field">
               <label>Preferred Publisher</label>
-              {editData.preferred_publisher === 'other' ? (
+              {isOtherPub(editData.preferred_publisher) ? (
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input
                     type="text"
@@ -108,6 +119,8 @@ function DeniseArticleCard({
                   <option value="">— Select —</option>
                   <option value="presswhizz">PressWhizz</option>
                   <option value="linksme">Links.me</option>
+                  <option value="collaborator">Collaborator.pro</option>
+                  <option value="prnews">PRnews.io</option>
                   <option value="other">Other</option>
                 </select>
               )}
@@ -531,12 +544,13 @@ export default function ClientPage() {
   const approve = async (id, notes, assignedTo = null, customNote = null, chosenPub = null) => {
     setApproving(id)
     const article  = articles.find(a => a.id === id)
-    // "Other" if Or explicitly picked Other in the panel, or article was already Other
-    const isOther  = chosenPub === 'other' || article?.preferred_publisher === 'other'
+    // "Other-like" if Or picked Other/Collaborator.pro/PRnews.io, or article already was one
+    const isOther  = isOtherPub(chosenPub) || isOtherPub(article?.preferred_publisher)
     const updateData = { status: 'approved', reminder_sent: false }
 
     if (isOther) {
-      updateData.chosen_publisher = 'other'
+      // Preserve the actual publisher value (collaborator/prnews/other), don't flatten to 'other'
+      updateData.chosen_publisher = chosenPub || article?.preferred_publisher
       if (assignedTo) updateData.assigned_to = assignedTo
     } else {
       // Use Or's panel selection, then article's existing choice, then preferred
@@ -850,7 +864,7 @@ export default function ClientPage() {
               </div>
               <div className="field">
                 <label>Preferred Publisher</label>
-                {form.preferred_publisher === 'other' ? (
+                {isOtherPub(form.preferred_publisher) ? (
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
                       type="text"
@@ -874,6 +888,8 @@ export default function ClientPage() {
                     <option value="">— Select —</option>
                     <option value="presswhizz">PressWhizz</option>
                     <option value="linksme">Links.me</option>
+                    <option value="collaborator">Collaborator.pro</option>
+                    <option value="prnews">PRnews.io</option>
                     <option value="other">Other</option>
                   </select>
                 )}
@@ -925,7 +941,7 @@ export default function ClientPage() {
 
         const renderOrCard = article => {
           const isEditing     = editingId === article.id
-          const isOther       = article.preferred_publisher === 'other'
+          const isOther       = isOtherPub(article.preferred_publisher)
           const canActOnIt    = article.status === 'submitted'
           const pricesLoading = !isOther && article.status === 'submitted'
             && article.price_presswhizz == null
@@ -1069,7 +1085,7 @@ export default function ClientPage() {
                   </div>
                 ) : approveNotesId === article.id ? (
                   <div className="approve-notes-area">
-                    {approveChosenPublisher === 'other' ? (
+                    {isOtherPub(approveChosenPublisher) ? (
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
                         <input
                           type="text"
@@ -1103,12 +1119,12 @@ export default function ClientPage() {
                       placeholder="Optional notes for publisher…"
                     />
                     <div className="approve-notes-actions">
-                      {approveChosenPublisher === 'other' ? (
+                      {isOtherPub(approveChosenPublisher) ? (
                         <>
                           <button
                             className="btn-approve"
                             style={{ marginLeft: 0 }}
-                            onClick={() => approve(article.id, approveNotes, 'denise', approveCustomNote || null, 'other')}
+                            onClick={() => approve(article.id, approveNotes, 'denise', approveCustomNote || null, approveChosenPublisher)}
                             disabled={approving === article.id}
                           >
                             {approving === article.id ? 'Approving…' : '→ Assign to Denise'}
@@ -1116,7 +1132,7 @@ export default function ClientPage() {
                           <button
                             className="btn-approve"
                             style={{ marginLeft: 0 }}
-                            onClick={() => approve(article.id, approveNotes, 'publisher', approveCustomNote || null, 'other')}
+                            onClick={() => approve(article.id, approveNotes, 'publisher', approveCustomNote || null, approveChosenPublisher)}
                             disabled={approving === article.id}
                           >
                             {approving === article.id ? 'Approving…' : '→ Assign to Publisher'}
@@ -1124,7 +1140,7 @@ export default function ClientPage() {
                           <button
                             className="btn-send"
                             style={{ marginLeft: 0 }}
-                            onClick={() => approve(article.id, approveNotes, 'or', approveCustomNote || null, 'other')}
+                            onClick={() => approve(article.id, approveNotes, 'or', approveCustomNote || null, approveChosenPublisher)}
                             disabled={approving === article.id}
                           >
                             {approving === article.id ? 'Approving…' : '→ Handle myself'}
@@ -1337,7 +1353,7 @@ export default function ClientPage() {
               </div>
 
               <div className="card-actions" style={{ flexDirection: 'column', gap: 8 }}>
-                {article.status === 'approved' && (article.preferred_publisher !== 'other' || article.assigned_to === 'publisher') && (
+                {article.status === 'approved' && (!isOtherPub(article.preferred_publisher) || article.assigned_to === 'publisher') && (
                   <>
                     <button className="btn-send" onClick={() => markSent(article.id)} disabled={markingId === article.id || returningId === article.id}>
                       {markingId === article.id ? 'Updating…' : 'Mark as sent to publisher'}

@@ -7,7 +7,14 @@ import { useAuth } from '../context/AuthContext'
 
 const API_BASE = 'https://greenlamp-publisher-production-75fd.up.railway.app'
 
-const PUB_LABEL = { presswhizz: 'PressWhizz', linksme: 'Links.me', other: 'Other' }
+const PUB_LABEL = {
+  presswhizz:   'PressWhizz',
+  linksme:      'Links.me',
+  collaborator: 'Collaborator.pro',
+  prnews:       'PRnews.io',
+  other:        'Other',
+}
+const isOtherPub = pub => ['other', 'collaborator', 'prnews'].includes(pub)
 
 const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 
@@ -439,9 +446,9 @@ export default function ClientsPage() {
       .select('id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, assigned_to, clients(name)')
       .eq('status', 'approved')
       .order('created_at', { ascending: true })
-    // Include non-Other articles + Other articles explicitly assigned to the publisher role
+    // Include non-Other-like articles + Other-like articles explicitly assigned to the publisher role
     const articles = (data ?? []).filter(a =>
-      (a.chosen_publisher || a.preferred_publisher) !== 'other' ||
+      !isOtherPub(a.chosen_publisher || a.preferred_publisher) ||
       a.assigned_to === 'publisher'
     )
     setPublisherArticles(articles)
@@ -582,7 +589,7 @@ export default function ClientsPage() {
   // Or table row
   const renderOrRow = (article, i) => {
     const effPub  = article.chosen_publisher || article.preferred_publisher
-    const isOther = effPub === 'other'
+    const isOther = isOtherPub(effPub)
     const pw = article.price_presswhizz
     const lm = article.price_linksme
     const priceStr = isOther ? null
