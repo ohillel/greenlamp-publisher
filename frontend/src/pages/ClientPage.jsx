@@ -92,7 +92,7 @@ function DeniseArticleCard({
             </div>
             <div className="denise-edit-field">
               <label>Preferred Publisher</label>
-              {isOtherPub(editData.preferred_publisher) ? (
+              {editData.preferred_publisher === 'other' ? (
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input
                     type="text"
@@ -864,7 +864,7 @@ export default function ClientPage() {
               </div>
               <div className="field">
                 <label>Preferred Publisher</label>
-                {isOtherPub(form.preferred_publisher) ? (
+                {form.preferred_publisher === 'other' ? (
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
                       type="text"
