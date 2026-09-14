@@ -256,6 +256,12 @@ export default function ClientsPage() {
   const navigate = useNavigate()
   const { role } = useAuth()
 
+  // Export to Excel and the Pending-publication tracker are shared by Or and the
+  // Publisher. Both read data every authenticated user can already see, so this
+  // only widens who reaches the existing controls — the queries and the export
+  // logic are untouched and stay in one place.
+  const canExportAndTrack = role === 'or' || role === 'publisher'
+
   // ── Export to Excel ──────────────────────────────────────────────────────────
 
   const [exporting,       setExporting]       = useState(false)
@@ -263,7 +269,7 @@ export default function ClientsPage() {
   const [exportCountry,   setExportCountry]    = useState('all')
   const [exportMonthOpts, setExportMonthOpts]  = useState([])  // [{value:'2026-05', label:'May 2026'}]
 
-  // ── Pending publication (Or-only read-only tracker) ─────────────────────────
+  // ── Pending publication (read-only tracker; Or + Publisher) ─────────────────
 
   const [pendingPubOpen,     setPendingPubOpen]     = useState(false)
   const [pendingPubArticles, setPendingPubArticles] = useState([])
@@ -310,7 +316,7 @@ export default function ClientsPage() {
 
   // Fetch distinct published months for the dropdown
   useEffect(() => {
-    if (role !== 'or') return
+    if (!canExportAndTrack) return
     supabase
       .from('articles')
       .select('published_at')
@@ -329,23 +335,23 @@ export default function ClientsPage() {
         }
         setExportMonthOpts(opts)
       })
-  }, [role])
+  }, [canExportAndTrack])
 
   // Fetch all articles awaiting publication (status = sent_to_publisher), oldest first
   const refreshPendingPub = useCallback(async () => {
-    if (role !== 'or') return
+    if (!canExportAndTrack) return
     const { data } = await supabase
       .from('articles')
       .select('id, client_id, status, created_at, updated_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, price_presswhizz, price_linksme, clients(name)')
       .eq('status', 'sent_to_publisher')
       .order('updated_at', { ascending: true })
     setPendingPubArticles(data ?? [])
-  }, [role])
+  }, [canExportAndTrack])
 
   useEffect(() => { if (pendingPubOpen) refreshPendingPub() }, [pendingPubOpen, refreshPendingPub])
 
   useEffect(() => {
-    if (role !== 'or') return
+    if (!canExportAndTrack) return
     const channel = supabase
       .channel('articles-pending-pub')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'articles' }, () => {
@@ -353,7 +359,7 @@ export default function ClientsPage() {
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [role, pendingPubOpen, refreshPendingPub])
+  }, [canExportAndTrack, pendingPubOpen, refreshPendingPub])
 
   const exportToExcel = async () => {
     setExporting(true)
@@ -805,7 +811,7 @@ export default function ClientsPage() {
             <button className="btn-add-client" onClick={() => setAdding(true)}>
               + New Client
             </button>
-            {role === 'or' && (
+            {canExportAndTrack && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
                 <select
                   value={exportMonth}
@@ -840,9 +846,12 @@ export default function ClientsPage() {
                 >
                   Pending publication
                 </button>
-                <button className="btn-ghost" onClick={openPriceCheck}>
-                  Price Check
-                </button>
+                {/* Price Check stays Or-only; the two controls above are shared. */}
+                {role === 'or' && (
+                  <button className="btn-ghost" onClick={openPriceCheck}>
+                    Price Check
+                  </button>
+                )}
               </div>
             )}
             <div className="clients-search-wrap">
@@ -903,8 +912,8 @@ export default function ClientsPage() {
 
       {loading && <div className="loading-inline">Loading…</div>}
 
-      {/* ── Pending publication tracker (Or-only) ── */}
-      {!loading && role === 'or' && pendingPubOpen && (
+      {/* ── Pending publication tracker (Or + Publisher) ── */}
+      {!loading && canExportAndTrack && pendingPubOpen && (
         <div style={{ marginBottom: 24 }}>
           <table className="pending-articles-table" style={{ width: '100%' }}>
             <thead>
