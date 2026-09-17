@@ -14,7 +14,7 @@ import os
 import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from .browser import save_session, load_session_kwargs, clear_session, apply_default_timeouts, screenshot
+from .browser import save_session, load_session_kwargs, clear_session, apply_default_timeouts, screenshot, describe_inputs
 
 BASE_URL  = "https://app.links.me"
 LOGIN_URL = f"{BASE_URL}/login"
@@ -79,38 +79,129 @@ def _is_on_login(page) -> bool:
 # ── Login ──────────────────────────────────────────────────────────────────────
 
 def _login(page, debug: bool):
+    """
+    Sign in to Links.me.
+
+    The login sequence itself is unchanged. What is new is diagnostics: the
+    screenshots here were all gated behind `debug`, which is False for the
+    Price Check, and the failure path saved none at all — so a login failure in
+    production left nothing to look at. The failure screenshot is now
+    unconditional and each step reports what it actually found.
+    """
     print("  [linksme] logging in…")
+
+    # Confirm the credentials the process can actually see. Lengths only —
+    # never the values — which still distinguishes "unset" from "stale" from
+    # "has a stray space".
+    email = os.environ.get("LINKSME_EMAIL")
+    pw    = os.environ.get("LINKSME_PASSWORD")
+    print(f"  [linksme] LINKSME_EMAIL set={bool(email)} "
+          f"len={len(email) if email else 0} "
+          f"domain={email.split('@')[-1] if email and '@' in email else 'n/a'} "
+          f"stripped_len={len(email.strip()) if email else 0}")
+    print(f"  [linksme] LINKSME_PASSWORD set={bool(pw)} "
+          f"len={len(pw) if pw else 0} "
+          f"stripped_len={len(pw.strip()) if pw else 0}")
+    if not email or not pw:
+        screenshot(page, "lm_login_FAILURE", True)
+        raise RuntimeError(
+            "Links.me login failed — LINKSME_EMAIL / LINKSME_PASSWORD is not set "
+            "in this process's environment."
+        )
+
     if not page.query_selector('input[type="password"]'):
         page.goto(LOGIN_URL, wait_until=NAV_WAIT)
         _wait(page, 3000)
+    print(f"  [linksme] login page url={page.url!r}")
     screenshot(page, "lm_01_login", debug)
 
     email_sel = 'input[type="email"], input[name="email"], input[placeholder*="email" i]'
-    page.wait_for_selector(email_sel, timeout=10000)
-    page.fill(email_sel, os.environ["LINKSME_EMAIL"])
+    try:
+        page.wait_for_selector(email_sel, timeout=10000)
+        print(f"  [linksme] email field found via {email_sel!r}")
+    except Exception:
+        print("  [linksme] email field NOT found — dumping the form:")
+        describe_inputs(page, "linksme")
+        screenshot(page, "lm_login_FAILURE", True)
+        raise
+    page.fill(email_sel, email)
 
     pw_sel = 'input[type="password"], input[name="password"]'
     try:
         page.wait_for_selector(pw_sel, timeout=5000)
-        page.fill(pw_sel, os.environ["LINKSME_PASSWORD"])
+        page.fill(pw_sel, pw)
+        print(f"  [linksme] password field found via {pw_sel!r}")
     except Exception:
+        filled = False
         for inp in page.query_selector_all('input'):
             t = (inp.get_attribute('type') or '').lower()
             p = (inp.get_attribute('placeholder') or '').lower()
             if t == 'password' or 'password' in p:
-                inp.fill(os.environ["LINKSME_PASSWORD"])
+                inp.fill(pw)
+                filled = True
+                print("  [linksme] password field found via attribute scan")
                 break
+        if not filled:
+            # A two-step form (email, then Next, then password) would land here.
+            print("  [linksme] password field NOT found — dumping the form:")
+            describe_inputs(page, "linksme")
 
     screenshot(page, "lm_02_filled", debug)
     page.click('button[type="submit"], button:has-text("Login"), button:has-text("Sign in")')
     _wait(page, 3000)
+    try:
+        page.wait_for_load_state("networkidle", timeout=8000)
+    except Exception:
+        pass
+    print(f"  [linksme] after submit url={page.url!r}")
     screenshot(page, "lm_03_after_login", debug)
 
     if _is_on_login(page):
+        # Always save this one — it is the only view of what blocked the login.
+        screenshot(page, "lm_login_FAILURE", True)
+        _report_login_blockers(page)
         raise RuntimeError(
             "Links.me login failed — still on login page. "
             "Check LINKSME_EMAIL / LINKSME_PASSWORD in .env"
         )
+    print("  [linksme] login OK")
+
+
+def _report_login_blockers(page) -> None:
+    """Log whatever the page says about a refused login: errors, captcha, 2FA."""
+    try:
+        body = page.inner_text("body")
+    except Exception:
+        body = ""
+
+    lowered = body.lower()
+    for marker in ("captcha", "recaptcha", "hcaptcha", "verify you are human",
+                   "two-factor", "2fa", "verification code", "confirm your email",
+                   "too many attempts", "blocked", "invalid", "incorrect"):
+        if marker in lowered:
+            print(f"  [linksme] page mentions {marker!r} after the login attempt")
+
+    try:
+        for sel in ('iframe[src*="recaptcha" i]', 'iframe[src*="captcha" i]',
+                    '.g-recaptcha', '[class*="captcha" i]'):
+            if page.query_selector(sel):
+                print(f"  [linksme] CAPTCHA element present: {sel!r}")
+    except Exception:
+        pass
+
+    # Short, visible error text is usually the actual reason.
+    try:
+        for sel in ('[class*="error" i]', '[class*="alert" i]', '[role="alert"]',
+                    '[class*="invalid" i]', '[class*="danger" i]'):
+            for el in page.query_selector_all(sel):
+                t = (el.inner_text() or "").strip()
+                if t and len(t) <= 200 and el.is_visible():
+                    print(f"  [linksme] on-page message: {t!r}")
+    except Exception:
+        pass
+
+    describe_inputs(page, "linksme")
+    print(f"  [linksme] first 400 chars of page text: {body[:400]!r}")
 
 
 # ── Project discovery ──────────────────────────────────────────────────────────
@@ -423,6 +514,9 @@ def get_price(magazine_domain: str, client_name: str, debug: bool = False) -> in
 
 def _get_price_inner(pw, browser, magazine_domain: str, client_name: str, debug: bool, retried_login: bool = False) -> int | None:
     kwargs  = load_session_kwargs("linksme")
+    # A restored session belongs to whichever account last logged in. After a
+    # credential change that can be the OLD account, so say which path was taken.
+    print(f"  [linksme] stored session restored={bool(kwargs)} retried_login={retried_login}")
     context = browser.new_context(**kwargs)
     page    = context.new_page()
     apply_default_timeouts(context, page)

@@ -28,19 +28,21 @@ import re
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from .browser import (
     save_session, load_session_kwargs, clear_session,
-    apply_default_timeouts, screenshot,
+    apply_default_timeouts, screenshot, describe_inputs,
 )
 from .eur_price import parse_all_eur, normalize_amount
 
 BASE_URL = "https://collaborator.pro"
 NAV_WAIT = "load"
 
-# The article catalog. project_id=0 is the "no project selected" view, which is
-# what an ad-hoc lookup wants. The rest are fallbacks in case it moves.
+# "/catalog" first because it is the path that demonstrably loaded in
+# production; the creator/article views (where the search field was seen)
+# follow as fallbacks. Whichever actually carries the search field wins —
+# see _open_catalog.
 CATALOG_PATHS = (
+    "/catalog",
     "/catalog/creator/article?project_id=0",
     "/catalog/creator/article",
-    "/catalog",
 )
 
 SITE = "collaborator"
@@ -134,18 +136,36 @@ def _login(page, debug: bool):
 
 def _open_catalog(page, debug: bool) -> bool:
     """
-    Open "Catalog of websites". It lives at /catalog/creator/article, so that
-    is tried first; the sidebar link is only a fallback.
+    Open "Catalog of websites".
+
+    Every candidate is loaded and the first one that actually carries the
+    search field wins. If none does, the first page that merely LOADED is kept
+    and this still reports success, so the run fails at the search step — with
+    its own screenshot and an input dump — rather than here. Returning False
+    when a page had loaded fine is what made the previous build fail earlier
+    than the one before it.
     """
+    first_loaded = None
+
     for path in CATALOG_PATHS:
         try:
             page.goto(f"{BASE_URL}{path}", wait_until=NAV_WAIT)
             _wait(page, 4000)
-            if _find_search_input(page) is not None:
-                print(f"  [{SITE}] opened catalog via URL {path!r}")
-                return True
-        except Exception:
+            try:
+                page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"  [{SITE}] {path!r} did not load: {e}")
             continue
+
+        has_box = _find_search_input(page) is not None
+        print(f"  [{SITE}] tried {path!r} → url={page.url!r} search_box={'yes' if has_box else 'no'}")
+        if has_box:
+            print(f"  [{SITE}] opened catalog via URL {path!r}")
+            return True
+        if first_loaded is None:
+            first_loaded = path
 
     for sel in ('a:has-text("Catalog of websites")', 'button:has-text("Catalog of websites")',
                 'a:has-text("Catalog")', 'button:has-text("Catalog")',
@@ -155,10 +175,22 @@ def _open_catalog(page, debug: bool) -> bool:
             if el and el.is_visible():
                 el.click()
                 _wait(page, 4000)
-                print(f"  [{SITE}] opened catalog via {sel!r}")
-                return True
+                if _find_search_input(page) is not None:
+                    print(f"  [{SITE}] opened catalog via {sel!r}")
+                    return True
         except Exception:
             continue
+
+    if first_loaded is not None:
+        # Keep going on a page that loaded; the search step reports what is there.
+        try:
+            page.goto(f"{BASE_URL}{first_loaded}", wait_until=NAV_WAIT)
+            _wait(page, 3500)
+        except Exception:
+            pass
+        print(f"  [{SITE}] no search field found on any candidate — continuing on {first_loaded!r} "
+              f"so the search step can report the page contents")
+        return True
 
     screenshot(page, "cl_no_catalog_FAILURE", True)
     return False
@@ -204,6 +236,7 @@ def _search_domain(page, domain: str, debug: bool) -> bool:
     el = _find_search_input(page)
     if el is None:
         screenshot(page, "cl_no_search_input_FAILURE", True)
+        describe_inputs(page, SITE)
         return False
 
     try:

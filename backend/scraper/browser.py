@@ -59,6 +59,46 @@ def apply_default_timeouts(context, page):
     page.set_default_navigation_timeout(DEFAULT_ACTION_TIMEOUT_MS)
 
 
+def describe_inputs(page, label: str, limit: int = 25) -> None:
+    """
+    Print every input-ish element on the page with its type, placeholder, name
+    and visibility.
+
+    Purely diagnostic. When a selector guess fails this is what shows whether
+    the field is simply named differently, is hidden, lives in an iframe, or is
+    not an <input> at all — far more useful than another round of guessing.
+    """
+    try:
+        els = page.query_selector_all('input, textarea, [contenteditable="true"]')
+    except Exception as e:
+        print(f"  [{label}] could not enumerate inputs: {e}")
+        return
+
+    print(f"  [{label}] {len(els)} input-ish element(s) on {page.url}")
+    for i, el in enumerate(els[:limit]):
+        try:
+            print(
+                f"      #{i} type={el.get_attribute('type')!r} "
+                f"placeholder={el.get_attribute('placeholder')!r} "
+                f"name={el.get_attribute('name')!r} "
+                f"id={el.get_attribute('id')!r} "
+                f"visible={el.is_visible()}"
+            )
+        except Exception:
+            continue
+    if len(els) > limit:
+        print(f"      … {len(els) - limit} more")
+
+    try:
+        frames = page.frames
+        if len(frames) > 1:
+            print(f"  [{label}] page has {len(frames)} frames — a field may live in an iframe:")
+            for f in frames[1:6]:
+                print(f"      frame url={f.url!r}")
+    except Exception:
+        pass
+
+
 def screenshot(page, name: str, debug: bool = True):
     """
     Save a screenshot. Always saves on failure paths (debug=True passed
