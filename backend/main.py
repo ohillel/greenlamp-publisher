@@ -175,6 +175,13 @@ async def price_check_bulk(req: BulkPriceCheckRequest):
         # Railway's memory and crash Chromium.
         async with _PRICE_FETCH_SEMAPHORE:
             results = await run_in_threadpool(check_prices_bulk, urls)
+
+        # A single domain is read straight off the screen, so there is no
+        # sheet to create. Anything more still exports as before.
+        if len(urls) == 1:
+            print("[price-check/bulk] single domain — returning results without a sheet")
+            return {"results": results, "sheet_url": None}
+
         print(f"[price-check/bulk] fetched prices, creating sheet…")
         sheet_url = await run_in_threadpool(create_price_check_sheet, results)
         print(f"[price-check/bulk] sheet created: {sheet_url}")

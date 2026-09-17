@@ -18,6 +18,22 @@ const isOtherPub = pub => ['other', 'collaborator', 'prnews'].includes(pub)
 
 const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 
+// PRNews.io and Collaborator.pro quote in EUR and are never converted, so they
+// render with a € rather than the $ used by PressWhizz and Links.me.
+const fmtEur = v => (
+  v != null
+    ? `${Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+    : null
+)
+
+// Sources shown for a single-domain lookup, in the same order as the sheet.
+const PRICE_CHECK_SOURCES = [
+  { key: 'price_presswhizz',   label: 'PressWhizz',       eur: false },
+  { key: 'price_linksme',      label: 'Links.me',         eur: false },
+  { key: 'price_prnews',       label: 'PRNews.io',        eur: true  },
+  { key: 'price_collaborator', label: 'Collaborator.pro', eur: true  },
+]
+
 const fmtDate = dateStr => {
   if (!dateStr) return '—'
   return new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -281,11 +297,15 @@ export default function ClientsPage() {
   const [priceCheckRunning, setPriceCheckRunning] = useState(false)
   const [priceCheckError,   setPriceCheckError]   = useState('')
   const [priceCheckSheetUrl, setPriceCheckSheetUrl] = useState('')
+  // Populated only for a single-domain lookup, which is shown on screen
+  // instead of being exported to a sheet.
+  const [priceCheckResult,  setPriceCheckResult]  = useState(null)
 
   const openPriceCheck = () => {
     setPriceCheckInput('')
     setPriceCheckError('')
     setPriceCheckSheetUrl('')
+    setPriceCheckResult(null)
     setPriceCheckRunning(false)
     setPriceCheckOpen(true)
   }
@@ -296,6 +316,7 @@ export default function ClientsPage() {
     setPriceCheckRunning(true)
     setPriceCheckError('')
     setPriceCheckSheetUrl('')
+    setPriceCheckResult(null)
     try {
       const res = await fetch(`${API_BASE}/api/price-check/bulk`, {
         method:  'POST',
@@ -307,7 +328,12 @@ export default function ClientsPage() {
         throw new Error(body.detail || `Request failed (${res.status})`)
       }
       const data = await res.json()
-      setPriceCheckSheetUrl(data.sheet_url || '')
+      if (urls.length === 1) {
+        // One domain: render the four prices here; the backend makes no sheet.
+        setPriceCheckResult((data.results || [])[0] ?? null)
+      } else {
+        setPriceCheckSheetUrl(data.sheet_url || '')
+      }
     } catch (err) {
       setPriceCheckError(err.message || 'Price check failed.')
     }
@@ -1199,6 +1225,35 @@ export default function ClientsPage() {
             {priceCheckSheetUrl && !priceCheckRunning && (
               <div style={{ marginTop: 14, fontSize: 13, color: '#16a34a' }}>
                 Done — results exported to Google Sheets.
+              </div>
+            )}
+
+            {/* A single domain is shown here instead of being exported. */}
+            {priceCheckResult && !priceCheckRunning && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 13, color: '#111827', fontWeight: 600, marginBottom: 8 }}>
+                  {priceCheckResult.domain || priceCheckResult.original_url}
+                </div>
+                <table className="pending-articles-table" style={{ width: '100%' }}>
+                  <thead>
+                    <tr><th>Source</th><th>Price</th></tr>
+                  </thead>
+                  <tbody>
+                    {PRICE_CHECK_SOURCES.map(src => {
+                      const value = priceCheckResult[src.key]
+                      return (
+                        <tr key={src.key}>
+                          <td>{src.label}</td>
+                          <td>
+                            {value == null
+                              ? <span className="cf-empty">Not found</span>
+                              : src.eur ? fmtEur(value) : fmtPrice(value)}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
 
