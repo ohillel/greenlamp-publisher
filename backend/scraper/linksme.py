@@ -7,7 +7,8 @@ Flow:
   3. On the dashboard, find the project whose name matches client_name.
   4. Navigate to that project's Guest Posting Sites List page.
   5. Click Filter, scroll to "Site Name or Keyword", enter the domain, click Apply.
-  6. Read the Price column — return the USD price found, or None if no match.
+  6. Read the Price column — return the price found (Links.me quotes in EUR;
+     USD is still parsed as a fallback), or None if no match.
   7. If no project matches client_name, return None (don't raise).
 """
 import os
@@ -15,6 +16,7 @@ import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from .browser import save_session, load_session_kwargs, clear_session, apply_default_timeouts, screenshot, describe_inputs
+from .eur_price import parse_eur
 
 BASE_URL  = "https://app.links.me"
 LOGIN_URL = f"{BASE_URL}/login"
@@ -424,20 +426,40 @@ def _apply_domain_filter(page, magazine_domain: str, debug: bool):
           f"{'no records' if 'no records' in filtered_text.lower() else 'results found'}")
 
 
-def _parse_price(text: str) -> int | None:
-    """Extract a USD price from a text fragment. Returns int or None."""
+def _parse_price(text: str) -> float | None:
+    """
+    Extract a price from a text fragment. Returns a float or None.
+
+    Links.me has moved from USD to EUR: the cell now reads "48.32 EUR". The
+    regex below only ever accepted USD/ILS and the € SYMBOL — never the literal
+    "EUR" — so every row parsed as None. EUR is handled by the shared parser in
+    eur_price.py, the same one the prnews and collaborator scrapers use, rather
+    than by teaching this regex a second currency.
+
+    USD is still tried as a fallback in case any row is still priced in dollars.
+
+    Cents are preserved (the articles.price_linksme column is NUMERIC(10,2));
+    the previous int(float(...)) discarded them, which would have turned
+    48.32 into 48.
+    """
+    # EUR first — this is the current format.
+    eur = parse_eur(text)
+    if eur is not None:
+        return eur
+
+    # USD / ILS fallback for any row still quoted in dollars.
     for m in _PRICE_RE.finditer(text):
         raw = m.group(1).replace(',', '').replace(' ', '')
         try:
-            val = int(float(raw))
+            val = float(raw)
             if 10 < val < 100_000:
-                return val
+                return round(val, 2)
         except ValueError:
             pass
     return None
 
 
-def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
+def _extract_prices(page, magazine_domain: str, debug: bool) -> list[float]:
     """
     Extract prices from the filtered table for exactly magazine_domain.
 
@@ -446,7 +468,7 @@ def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
     returning prices for sites like 'rprinvesting.com' when searching 'investing.com'.
     """
     screenshot(page, "lm_09_price_scan", True)
-    prices: list[int] = []
+    prices: list[float] = []
 
     body_text = page.inner_text("body")
     print(f"  [linksme] price scan: page text is {len(body_text)} chars")
@@ -543,7 +565,7 @@ def _extract_prices(page, magazine_domain: str, debug: bool) -> list[int]:
 
 # ── Public entry point ─────────────────────────────────────────────────────────
 
-def get_price(magazine_domain: str, client_name: str, debug: bool = False) -> int | None:
+def get_price(magazine_domain: str, client_name: str, debug: bool = False) -> float | None:
     """
     Returns the USD Guest Post price for magazine_domain in the Links.me project
     matching client_name, or None if not found.
@@ -565,7 +587,7 @@ def get_price(magazine_domain: str, client_name: str, debug: bool = False) -> in
                 pass
 
 
-def _get_price_inner(pw, browser, magazine_domain: str, client_name: str, debug: bool, retried_login: bool = False) -> int | None:
+def _get_price_inner(pw, browser, magazine_domain: str, client_name: str, debug: bool, retried_login: bool = False) -> float | None:
     kwargs  = load_session_kwargs("linksme")
     # A restored session belongs to whichever account last logged in. After a
     # credential change that can be the OLD account, so say which path was taken.
