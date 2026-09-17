@@ -35,10 +35,15 @@ from .eur_price import parse_eur
 BASE_URL  = "https://prnews.io"
 NAV_WAIT  = "load"
 
-# "/catalog" first because it is the path that demonstrably loaded in
-# production; "/sites/" (where the search box was seen) and the rest follow as
-# fallbacks. Whichever actually carries the search box wins — see _open_catalog.
-CATALOG_PATHS = ("/catalog", "/sites/", "/sites", "/en/sites/")
+# "/sites/" is the real catalog (that is where the search box was seen);
+# "/catalog" follows as a fallback. Whichever actually carries the search box
+# wins — see _open_catalog.
+CATALOG_PATHS = ("/sites/", "/sites", "/catalog", "/en/sites/")
+
+# _open_catalog outcomes.
+CATALOG_OK     = "ok"       # a catalog page is open
+CATALOG_LOGIN  = "login"    # the site redirected us to the login page
+CATALOG_FAILED = "failed"   # nothing loaded at all
 
 SITE = "prnews"
 
@@ -108,10 +113,27 @@ def _login(page, debug: bool):
 
     screenshot(page, "pn_01_login", debug)
 
+    print(f"  [{SITE}] login page url={page.url!r}")
+
     email_sel = 'input[type="email"], input[name="email"], input[name="login"], input[placeholder*="mail" i]'
-    page.wait_for_selector(email_sel, timeout=10000)
+    try:
+        page.wait_for_selector(email_sel, timeout=10000)
+        print(f"  [{SITE}] email field found via {email_sel!r}")
+    except Exception:
+        # The real field names are unknown — dump them so the next run says.
+        print(f"  [{SITE}] email field NOT found — dumping the login form:")
+        describe_inputs(page, SITE)
+        screenshot(page, "pn_login_form_FAILURE", True)
+        raise
     page.fill(email_sel, os.environ["PRNEWS_EMAIL"])
-    page.fill('input[type="password"]', os.environ["PRNEWS_PASSWORD"])
+
+    try:
+        page.fill('input[type="password"]', os.environ["PRNEWS_PASSWORD"])
+    except Exception:
+        print(f"  [{SITE}] password field NOT found — dumping the login form:")
+        describe_inputs(page, SITE)
+        screenshot(page, "pn_login_form_FAILURE", True)
+        raise
     screenshot(page, "pn_02_filled", debug)
 
     page.click(
@@ -131,16 +153,19 @@ def _login(page, debug: bool):
 
 # ── Catalog navigation ────────────────────────────────────────────────────────
 
-def _open_catalog(page, debug: bool) -> bool:
+def _open_catalog(page, debug: bool) -> str:
     """
-    Open the site catalog.
+    Open the site catalog, reporting CATALOG_OK / CATALOG_LOGIN / CATALOG_FAILED.
 
-    Every candidate is loaded and the first one that actually carries the
-    search box wins. If none does, the first page that merely LOADED is kept
-    and this still reports success, so the run fails at the search step — with
-    its own screenshot and an input dump — rather than here. Returning False
-    when a page had loaded fine is what made the previous build fail earlier
-    than the one before it.
+    A redirect to /login is the only reliable signal that a login is needed:
+    prnews.io's homepage is a public marketing page, so inferring auth state
+    from it (as this scraper originally did) meant the login step never ran.
+    Returning CATALOG_LOGIN stops here and lets the caller sign in, rather than
+    navigating away from the login page.
+
+    If a candidate loads but has no search box, the first such page is kept and
+    CATALOG_OK returned, so the run fails at the search step — with its own
+    screenshot and input dump — rather than here.
     """
     first_loaded = None
 
@@ -156,11 +181,15 @@ def _open_catalog(page, debug: bool) -> bool:
             print(f"  [{SITE}] {path!r} did not load: {e}")
             continue
 
+        if _is_on_login(page):
+            print(f"  [{SITE}] {path!r} redirected to the login page ({page.url!r}) — signing in")
+            return CATALOG_LOGIN
+
         has_box = _find_search_input(page) is not None
         print(f"  [{SITE}] tried {path!r} → url={page.url!r} search_box={'yes' if has_box else 'no'}")
         if has_box:
             print(f"  [{SITE}] opened catalog via URL {path!r}")
-            return True
+            return CATALOG_OK
         if first_loaded is None:
             first_loaded = path
 
@@ -171,9 +200,12 @@ def _open_catalog(page, debug: bool) -> bool:
             if el and el.is_visible():
                 el.click()
                 _wait(page, 3500)
+                if _is_on_login(page):
+                    print(f"  [{SITE}] {sel!r} led to the login page — signing in")
+                    return CATALOG_LOGIN
                 if _find_search_input(page) is not None:
                     print(f"  [{SITE}] opened catalog via {sel!r}")
-                    return True
+                    return CATALOG_OK
         except Exception:
             continue
 
@@ -186,10 +218,10 @@ def _open_catalog(page, debug: bool) -> bool:
             pass
         print(f"  [{SITE}] no search box found on any candidate — continuing on {first_loaded!r} "
               f"so the search step can report the page contents")
-        return True
+        return CATALOG_OK
 
     screenshot(page, "pn_no_catalog_FAILURE", True)
-    return False
+    return CATALOG_FAILED
 
 
 def _find_search_input(page):
@@ -401,12 +433,13 @@ def _get_price_inner(pw, browser, magazine_domain: str, debug: bool,
     page    = context.new_page()
     apply_default_timeouts(context, page)
 
-    # ── 1. Navigate ─────────────────────────────────────────────────────
-    page.goto(BASE_URL, wait_until=NAV_WAIT)
-    _wait(page, 2000)
-    screenshot(page, "pn_00_home", debug)
+    # ── 1. Catalog, signing in if the site sends us to the login page ───
+    # Go straight to the protected catalog rather than probing the homepage:
+    # prnews.io's homepage is public, so it never reveals whether we are signed
+    # in. The /login redirect is the real signal.
+    status = _open_catalog(page, debug)
 
-    if _is_on_login(page):
+    if status == CATALOG_LOGIN:
         try:
             _login(page, debug)
         except (RuntimeError, PlaywrightTimeoutError) as e:
@@ -420,17 +453,24 @@ def _get_price_inner(pw, browser, magazine_domain: str, debug: bool,
             raise
         save_session(context, SITE)
 
-    # ── 2. Catalog ──────────────────────────────────────────────────────
-    if not _open_catalog(page, debug):
+        # Signed in — open the catalog again, following the redirect back.
+        status = _open_catalog(page, debug)
+        if status == CATALOG_LOGIN:
+            screenshot(page, "pn_still_login_after_auth_FAILURE", True)
+            if not retried_login:
+                print(f"  [{SITE}] still redirected to login after signing in — "
+                      f"clearing session and retrying once")
+                clear_session(SITE)
+                context.close()
+                return _get_price_inner(pw, browser, magazine_domain, debug, retried_login=True)
+            raise RuntimeError(
+                "prnews.io: still redirected to the login page after signing in. "
+                "The session is not being accepted — check debug screenshots."
+            )
+
+    if status == CATALOG_FAILED:
         raise RuntimeError("prnews.io: could not open the Catalog. Check debug screenshots.")
     screenshot(page, "pn_04_catalog", debug)
-
-    # A session can expire into a login wall only once inside the catalog.
-    if _is_on_login(page) and not retried_login:
-        print(f"  [{SITE}] hit login wall inside catalog — clearing session and retrying once")
-        clear_session(SITE)
-        context.close()
-        return _get_price_inner(pw, browser, magazine_domain, debug, retried_login=True)
 
     # ── 3. Search ───────────────────────────────────────────────────────
     if not _search_domain(page, domain, debug):

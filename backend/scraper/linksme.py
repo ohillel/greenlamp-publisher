@@ -148,15 +148,8 @@ def _login(page, debug: bool):
 
     screenshot(page, "lm_02_filled", debug)
     page.click('button[type="submit"], button:has-text("Login"), button:has-text("Sign in")')
-    _wait(page, 3000)
-    try:
-        page.wait_for_load_state("networkidle", timeout=8000)
-    except Exception:
-        pass
-    print(f"  [linksme] after submit url={page.url!r}")
-    screenshot(page, "lm_03_after_login", debug)
 
-    if _is_on_login(page):
+    if not _wait_for_logged_in(page):
         # Always save this one — it is the only view of what blocked the login.
         screenshot(page, "lm_login_FAILURE", True)
         _report_login_blockers(page)
@@ -164,7 +157,67 @@ def _login(page, debug: bool):
             "Links.me login failed — still on login page. "
             "Check LINKSME_EMAIL / LINKSME_PASSWORD in .env"
         )
-    print("  [linksme] login OK")
+    print(f"  [linksme] login OK — url={page.url!r}")
+    screenshot(page, "lm_03_after_login", debug)
+
+
+# Text that only appears once the dashboard has rendered. Used as a second
+# success signal for the case where the SPA swaps the view without the URL
+# changing in time.
+_LOGGED_IN_MARKERS = ("my projects", "dashboard")
+
+LOGIN_SUCCESS_TIMEOUT_MS = 20_000
+
+
+def _wait_for_logged_in(page) -> bool:
+    """
+    Wait for evidence that the login SUCCEEDED, rather than for the absence of
+    a login URL.
+
+    The old check ran `'/login' in page.url` a fixed 3s after submitting. Links.me
+    signs in over XHR and then routes client-side, so the URL can still read
+    /login while the dashboard is already rendering — the logs showed
+    "after submit url=.../login" immediately followed by dashboard content and
+    url=/dashboard. That raced check failed a login that had in fact worked, and
+    because it raised, save_session() never ran, so every later run had to log in
+    again and failed the same way.
+
+    Returns True as soon as either the URL leaves /login or a dashboard marker
+    appears; False only if neither happens within the timeout.
+    """
+    # Primary signal: the URL leaves the login route.
+    try:
+        page.wait_for_url(
+            lambda u: not any(p in u for p in ('/login', '/signin', '/auth')),
+            timeout=LOGIN_SUCCESS_TIMEOUT_MS,
+        )
+        print(f"  [linksme] login confirmed by URL change → {page.url!r}")
+        return True
+    except Exception:
+        pass
+
+    # Secondary signal: the dashboard rendered even though the URL lags behind.
+    try:
+        body = (page.inner_text("body") or "").lower()
+    except Exception:
+        body = ""
+    for marker in _LOGGED_IN_MARKERS:
+        if marker in body:
+            print(f"  [linksme] login confirmed by page content ({marker!r}) "
+                  f"while url still reads {page.url!r}")
+            return True
+
+    # Last check: no password field left on the page means the form is gone.
+    try:
+        if not page.query_selector('input[type="password"]'):
+            print(f"  [linksme] login confirmed — login form gone (url={page.url!r})")
+            return True
+    except Exception:
+        pass
+
+    print(f"  [linksme] no sign of a successful login after "
+          f"{LOGIN_SUCCESS_TIMEOUT_MS}ms (url={page.url!r})")
+    return False
 
 
 def _report_login_blockers(page) -> None:
