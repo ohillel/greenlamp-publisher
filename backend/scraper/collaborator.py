@@ -35,6 +35,14 @@ from .eur_price import parse_all_eur, normalize_amount
 BASE_URL = "https://collaborator.pro"
 NAV_WAIT = "load"
 
+# The article catalog. project_id=0 is the "no project selected" view, which is
+# what an ad-hoc lookup wants. The rest are fallbacks in case it moves.
+CATALOG_PATHS = (
+    "/catalog/creator/article?project_id=0",
+    "/catalog/creator/article",
+    "/catalog",
+)
+
 SITE = "collaborator"
 
 _DOMAIN_TOKEN_RE = re.compile(r'[a-z0-9][a-z0-9\-]*(?:\.[a-z0-9\-]+)+', re.IGNORECASE)
@@ -125,7 +133,20 @@ def _login(page, debug: bool):
 # ── Catalog navigation ────────────────────────────────────────────────────────
 
 def _open_catalog(page, debug: bool) -> bool:
-    """Click "Catalog of websites" in the left sidebar; fall back to URLs."""
+    """
+    Open "Catalog of websites". It lives at /catalog/creator/article, so that
+    is tried first; the sidebar link is only a fallback.
+    """
+    for path in CATALOG_PATHS:
+        try:
+            page.goto(f"{BASE_URL}{path}", wait_until=NAV_WAIT)
+            _wait(page, 4000)
+            if _find_search_input(page) is not None:
+                print(f"  [{SITE}] opened catalog via URL {path!r}")
+                return True
+        except Exception:
+            continue
+
     for sel in ('a:has-text("Catalog of websites")', 'button:has-text("Catalog of websites")',
                 'a:has-text("Catalog")', 'button:has-text("Catalog")',
                 '[class*="sidebar" i] a:has-text("Catalog")'):
@@ -133,19 +154,8 @@ def _open_catalog(page, debug: bool) -> bool:
             el = page.query_selector(sel)
             if el and el.is_visible():
                 el.click()
-                _wait(page, 3500)
+                _wait(page, 4000)
                 print(f"  [{SITE}] opened catalog via {sel!r}")
-                return True
-        except Exception:
-            continue
-
-    for path in ("/catalog", "/en/catalog", "/websites", "/sites"):
-        try:
-            page.goto(f"{BASE_URL}{path}", wait_until=NAV_WAIT)
-            _wait(page, 3500)
-            url = page.url.lower()
-            if any(k in url for k in ("catalog", "websites", "sites")):
-                print(f"  [{SITE}] opened catalog via URL {path!r}")
                 return True
         except Exception:
             continue
@@ -154,8 +164,8 @@ def _open_catalog(page, debug: bool) -> bool:
     return False
 
 
-def _search_domain(page, domain: str, debug: bool) -> bool:
-    """Type the domain into the "Search by domain" field and submit."""
+def _find_search_input(page):
+    """The "Search by domain" box, which sits in the table's header row."""
     for sel in [
         'input[placeholder*="search by domain" i]',
         'input[placeholder*="domain" i]',
@@ -165,21 +175,60 @@ def _search_domain(page, domain: str, debug: bool) -> bool:
         'input[name*="query" i]',
     ]:
         try:
-            page.wait_for_selector(sel, timeout=3000, state="visible")
             el = page.query_selector(sel)
             if el and el.is_visible():
-                el.fill("")
-                el.fill(domain)
-                _wait(page, 500)
-                page.keyboard.press("Enter")
-                _wait(page, 4000)
-                print(f"  [{SITE}] searched {domain!r} via {sel!r}")
-                return True
+                return el
         except Exception:
             continue
 
-    screenshot(page, "cl_no_search_input_FAILURE", True)
-    return False
+    try:
+        for el in page.query_selector_all('input'):
+            t = (el.get_attribute('type') or 'text').lower()
+            if t in ('checkbox', 'radio', 'hidden', 'submit', 'button'):
+                continue
+            if el.is_visible():
+                return el
+    except Exception:
+        pass
+    return None
+
+
+def _search_domain(page, domain: str, debug: bool) -> bool:
+    """
+    Type the domain into "Search by domain", submit, and wait for the table.
+
+    Typing opens an autocomplete dropdown of domain suggestions. It is
+    dismissed with Escape after submitting so it cannot overlay the filtered
+    rows while they are being read.
+    """
+    el = _find_search_input(page)
+    if el is None:
+        screenshot(page, "cl_no_search_input_FAILURE", True)
+        return False
+
+    try:
+        el.click()
+        el.fill("")
+        el.fill(domain)
+        _wait(page, 800)          # let the autocomplete settle before submitting
+        page.keyboard.press("Enter")
+        _wait(page, 4000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
+        # Close the suggestion dropdown so it does not cover the results.
+        try:
+            page.keyboard.press("Escape")
+            _wait(page, 800)
+        except Exception:
+            pass
+        print(f"  [{SITE}] searched {domain!r}")
+        return True
+    except Exception as e:
+        print(f"  [{SITE}] could not type into the search field: {e}")
+        screenshot(page, "cl_search_failed_FAILURE", True)
+        return False
 
 
 # ── Row matching + price ──────────────────────────────────────────────────────
@@ -224,24 +273,51 @@ def _large_price_from_cell(cell_text: str) -> float | None:
     return None
 
 
-def _price_for_row(row, debug: bool) -> float | None:
+def _find_price_column_index(page) -> int | None:
+    """
+    Index of the "Price" column from the table header.
+
+    This matters: the table is
+        (checkbox) | Category | Monthly Traffic | DR | Price | With discount
+    so "With discount" holds a second, lower price to its right. Picking a
+    currency cell by position instead of by header would silently return the
+    discounted figure.
+    """
+    try:
+        headers = page.query_selector_all('th')
+    except Exception:
+        return None
+
+    for i, th in enumerate(headers):
+        t = _safe_text(th).strip().lower()
+        # Exactly "price" — never "with discount", never "price with discount".
+        if t == 'price':
+            print(f"  [{SITE}] 'Price' column is index {i}")
+            return i
+    return None
+
+
+def _price_for_row(row, price_col_index: int | None, debug: bool) -> float | None:
     """Read the Price column of a matched row."""
-    # Prefer a cell that actually looks like the price column.
     try:
         cells = row.query_selector_all('td')
     except Exception:
         cells = []
 
-    candidates = []
+    # Preferred: the cell under the "Price" header.
+    if price_col_index is not None and 0 <= price_col_index < len(cells):
+        val = _large_price_from_cell(_safe_text(cells[price_col_index]))
+        if val is not None:
+            return val
+
+    # Fallback: the LEFT-most currency cell. "Price" precedes "With discount",
+    # so leftmost is the safer guess when the header could not be located.
     for c in cells:
         t = _safe_text(c)
         if 'EUR' in t.upper() or '€' in t:
-            candidates.append(t)
-    # Right-most currency cell is the Price column on this layout.
-    for t in reversed(candidates):
-        val = _large_price_from_cell(t)
-        if val is not None:
-            return val
+            val = _large_price_from_cell(t)
+            if val is not None:
+                return val
 
     # No <td> matched (card/grid layout) — fall back to the whole row.
     return _large_price_from_cell(_safe_text(row))
@@ -337,7 +413,10 @@ def _get_price_inner(pw, browser, magazine_domain: str, debug: bool,
         return None
 
     # ── 5. Price ────────────────────────────────────────────────────────
-    price = _price_for_row(row, debug)
+    price_col = _find_price_column_index(page)
+    if price_col is None:
+        print(f"  [{SITE}] could not locate the 'Price' header — falling back to the leftmost currency cell")
+    price = _price_for_row(row, price_col, debug)
     if price is None:
         screenshot(page, "cl_no_price_in_row_FAILURE", True)
         print(f"  [{SITE}] matched the row but found no EUR price in it")

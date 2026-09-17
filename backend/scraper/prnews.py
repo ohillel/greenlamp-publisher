@@ -35,6 +35,9 @@ from .eur_price import parse_eur
 BASE_URL  = "https://prnews.io"
 NAV_WAIT  = "load"
 
+# The catalog lives at /sites/. The rest are fallbacks in case it moves.
+CATALOG_PATHS = ("/sites/", "/sites", "/catalog", "/en/sites/")
+
 SITE = "prnews"
 
 # The tag that qualifies a card. Compared case-insensitively against the
@@ -127,25 +130,28 @@ def _login(page, debug: bool):
 # ── Catalog navigation ────────────────────────────────────────────────────────
 
 def _open_catalog(page, debug: bool) -> bool:
-    """Click "Catalog" in the top nav. Falls back to known catalog URLs."""
+    """
+    Open the site catalog. It lives at /sites/, so that is tried first; the
+    nav link and other paths are only fallbacks.
+    """
+    for path in CATALOG_PATHS:
+        try:
+            page.goto(f"{BASE_URL}{path}", wait_until=NAV_WAIT)
+            _wait(page, 3500)
+            if _find_search_input(page) is not None:
+                print(f"  [{SITE}] opened catalog via URL {path!r}")
+                return True
+        except Exception:
+            continue
+
     for sel in ('a:has-text("Catalog")', 'button:has-text("Catalog")',
                 'nav a:has-text("Catalog")', '[role="navigation"] a:has-text("Catalog")'):
         try:
             el = page.query_selector(sel)
             if el and el.is_visible():
                 el.click()
-                _wait(page, 3000)
+                _wait(page, 3500)
                 print(f"  [{SITE}] opened catalog via {sel!r}")
-                return True
-        except Exception:
-            continue
-
-    for path in ("/catalog", "/en/catalog", "/sites"):
-        try:
-            page.goto(f"{BASE_URL}{path}", wait_until=NAV_WAIT)
-            _wait(page, 3000)
-            if "catalog" in page.url.lower() or "sites" in page.url.lower():
-                print(f"  [{SITE}] opened catalog via URL {path!r}")
                 return True
         except Exception:
             continue
@@ -154,32 +160,68 @@ def _open_catalog(page, debug: bool) -> bool:
     return False
 
 
-def _search_domain(page, domain: str, debug: bool) -> bool:
-    """Type the domain into the catalog search box and submit."""
+def _find_search_input(page):
+    """
+    The catalog's single wide search box (placeholder "Search").
+
+    Falls back to any visible text input on the page, since the placeholder is
+    the only thing distinguishing it and that is the part most likely to change.
+    """
     for sel in [
-        'input[type="search"]',
+        'input[placeholder="Search"]',
         'input[placeholder*="search" i]',
+        'input[type="search"]',
         'input[placeholder*="domain" i]',
         'input[placeholder*="site" i]',
         'input[name*="search" i]',
         'input[name*="query" i]',
     ]:
         try:
-            page.wait_for_selector(sel, timeout=3000, state="visible")
             el = page.query_selector(sel)
             if el and el.is_visible():
-                el.fill("")
-                el.fill(domain)
-                _wait(page, 500)
-                page.keyboard.press("Enter")
-                _wait(page, 4000)
-                print(f"  [{SITE}] searched {domain!r} via {sel!r}")
-                return True
+                return el
         except Exception:
             continue
 
-    screenshot(page, "pn_no_search_input_FAILURE", True)
-    return False
+    # Last resort: the first visible free-text input that is not a checkbox,
+    # radio or hidden field.
+    try:
+        for el in page.query_selector_all('input'):
+            t = (el.get_attribute('type') or 'text').lower()
+            if t in ('checkbox', 'radio', 'hidden', 'submit', 'button'):
+                continue
+            if el.is_visible():
+                return el
+    except Exception:
+        pass
+    return None
+
+
+def _search_domain(page, domain: str, debug: bool) -> bool:
+    """Type the domain into the catalog search box, submit, wait for results."""
+    el = _find_search_input(page)
+    if el is None:
+        screenshot(page, "pn_no_search_input_FAILURE", True)
+        return False
+
+    try:
+        el.click()
+        el.fill("")
+        el.fill(domain)
+        _wait(page, 600)
+        page.keyboard.press("Enter")
+        # Results re-render in place; give the grid time to swap.
+        _wait(page, 4500)
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
+        print(f"  [{SITE}] searched {domain!r}")
+        return True
+    except Exception as e:
+        print(f"  [{SITE}] could not type into the search box: {e}")
+        screenshot(page, "pn_search_failed_FAILURE", True)
+        return False
 
 
 # ── Card matching ─────────────────────────────────────────────────────────────
@@ -207,30 +249,48 @@ def _card_domain_matches(card, domain: str) -> bool:
     return False
 
 
-def _card_tag_is_article(card) -> bool:
+def _card_tags(card) -> set[str]:
     """
-    True when the card carries a tag whose exact text is "Article".
+    The short tag-like texts inside a card, lowercased.
 
-    Checked against each descendant's own trimmed text rather than the card's
-    full text, so "Press Release" cannot satisfy it and a card merely
-    mentioning the word "article" in prose is not accepted.
+    Read from each descendant's own trimmed text rather than the card's full
+    text, so "Press Release" cannot be mistaken for "Article" and a card merely
+    using the word "article" in a sentence is not counted.
     """
+    tags: set[str] = set()
     try:
         for el in card.query_selector_all('span, div, p, small, em, b, strong, li'):
             t = _safe_text(el).strip().lower()
-            if not t or len(t) > 40:
-                continue
-            if t in REJECTED_TAGS:
-                continue
-            if t == WANTED_TAG:
-                return True
+            if t and len(t) <= 40:
+                tags.add(t)
     except Exception:
         pass
-    return False
+    return tags
+
+
+def _card_tag_is_article(card) -> bool:
+    """
+    True when the card is tagged "Article" and carries no competing tag.
+
+    The second half matters: a grid wrapper holding every result would contain
+    an "Article" tag somewhere as well as "Press Release" and "Contributor
+    Post", and would otherwise pass — handing back a price from the wrong card.
+    """
+    tags = _card_tags(card)
+    if WANTED_TAG not in tags:
+        return False
+    return not (tags & REJECTED_TAGS)
 
 
 def _find_matching_card(page, domain: str, debug: bool):
-    """The one card matching BOTH the exact domain and the "Article" tag."""
+    """
+    The one card matching BOTH the exact domain and the "Article" tag.
+
+    Candidates are gathered from several selectors and the SMALLEST one wins.
+    Broad selectors also match the container holding every result, and that
+    container contains the domain too — picking the shortest text keeps the
+    individual card rather than its ancestor.
+    """
     selectors = [
         '[class*="card" i]',
         '[class*="item" i]',
@@ -239,7 +299,12 @@ def _find_matching_card(page, domain: str, debug: bool):
         'article',
         'li',
     ]
-    seen_domain_cards = 0
+
+    domain_cards = 0
+    best = None
+    best_len = None
+    seen_tags: set[str] = set()
+
     for sel in selectors:
         try:
             cards = page.query_selector_all(sel)
@@ -249,18 +314,23 @@ def _find_matching_card(page, domain: str, debug: bool):
             try:
                 if not _card_domain_matches(card, domain):
                     continue
-                seen_domain_cards += 1
-                if _card_tag_is_article(card):
-                    print(f"  [{SITE}] matched card via {sel!r} (exact domain + Article tag)")
-                    return card
+                domain_cards += 1
+                seen_tags |= (_card_tags(card) & (REJECTED_TAGS | {WANTED_TAG}))
+                if not _card_tag_is_article(card):
+                    continue
+                text_len = len(_safe_text(card))
+                if best_len is None or text_len < best_len:
+                    best, best_len = card, text_len
             except Exception:
                 continue
-        if seen_domain_cards:
-            # Exact-domain cards existed at this level but none was an Article.
-            break
 
-    if seen_domain_cards:
-        print(f"  [{SITE}] {seen_domain_cards} exact-domain card(s) found, none tagged 'Article'")
+    if best is not None:
+        print(f"  [{SITE}] matched card (exact domain + Article tag, {best_len} chars)")
+        return best
+
+    if domain_cards:
+        print(f"  [{SITE}] {domain_cards} exact-domain card(s) found, none tagged 'Article' "
+              f"(tags seen: {sorted(seen_tags) or 'none'})")
     else:
         print(f"  [{SITE}] no card with an exact domain match for {domain!r}")
     screenshot(page, "pn_no_matching_card", debug)
