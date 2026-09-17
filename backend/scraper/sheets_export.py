@@ -8,15 +8,13 @@ import os
 import sys
 from datetime import datetime
 
-# Column order in the sheet. Links.me now quotes in EUR alongside PRNews and
-# Collaborator, leaving PressWhizz as the only plain-number column. The EUR
-# columns are written as numbers and given a € number format so they still
-# sort and sum.
-HEADERS = ["URL", "PressWhizz Price", "Links.me Price", "PRNews.io", "Collaborator.pro"]
+# Column order in the sheet. Links.me and Collaborator quote in EUR, leaving
+# PressWhizz as the only plain-number column. The EUR columns are written as
+# numbers and given a € number format so they still sort and sum.
+HEADERS = ["URL", "PressWhizz Price", "Links.me Price", "Collaborator.pro"]
 
-# 0-based indices of the EUR columns: Links.me (C), PRNews.io (D),
-# Collaborator.pro (E).
-_EUR_COLUMN_INDICES = (2, 3, 4)
+# 0-based indices of the EUR columns: Links.me (C), Collaborator.pro (D).
+_EUR_COLUMN_INDICES = (2, 3)
 _EUR_NUMBER_FORMAT = '#,##0.00" €"'
 
 
@@ -31,7 +29,7 @@ def _sheets_service():
 def create_price_check_sheet(rows: list[dict]) -> str:
     """
     rows: list of {original_url, price_presswhizz, price_linksme,
-                   price_prnews, price_collaborator}
+                   price_collaborator}
     Creates a new spreadsheet titled "Price Check — DD.MM.YYYY", writes one
     row per entry, and returns the spreadsheet's URL.
     """
@@ -51,7 +49,6 @@ def create_price_check_sheet(rows: list[dict]) -> str:
             row.get("original_url", ""),
             _cell(row.get("price_presswhizz")),
             _cell(row.get("price_linksme")),
-            _cell(row.get("price_prnews")),
             _cell(row.get("price_collaborator")),
         ])
 

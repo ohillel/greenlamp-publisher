@@ -1,12 +1,12 @@
 """
-EUR price parsing shared by the prnews.io and collaborator.pro scrapers.
+EUR price parsing shared by the Links.me scraper and the Collaborator.pro
+API client.
 
-The two sites write the same currency differently — PRNews shows
-"113,40 EUR" (comma decimal) and Collaborator shows "160.95 EUR" (dot
-decimal) — so both separators have to be accepted, and thousands
-separators are ambiguous between them ("1.234,56" and "1,234.56" are the
-same number). The rule used here is "the last separator is the decimal
-one", which resolves both spellings correctly.
+Sources write the same currency differently — "113,40 EUR" (comma decimal)
+and "160.95 EUR" (dot decimal) — so both separators have to be accepted,
+and thousands separators are ambiguous between them ("1.234,56" and
+"1,234.56" are the same number). The rule used here is "the last separator
+is the decimal one", which resolves both spellings correctly.
 
 Prices stay in EUR. Nothing here converts to USD.
 """

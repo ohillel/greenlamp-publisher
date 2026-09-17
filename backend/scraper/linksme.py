@@ -259,6 +259,61 @@ def _report_login_blockers(page) -> None:
     print(f"  [linksme] first 400 chars of page text: {body[:400]!r}")
 
 
+# ── Dashboard readiness ────────────────────────────────────────────────────────
+
+# The per-project "Guest Posting Sites List" links. Their presence is the only
+# reliable proof that we are signed in AND the dashboard has finished rendering.
+PROJECT_LINK_SELECTOR = 'a[href*="/catalog/guest-posting"]'
+PROJECTS_TIMEOUT_MS = 20_000
+
+
+def _wait_for_projects(page) -> bool:
+    """
+    Wait for the dashboard's project links to render.
+
+    The project list is loaded by JavaScript after the page load event, so the
+    old fixed `_wait(page, 2000)` was a guess: fast enough an hour ago, too
+    short later, and it reported "0 projects" either way. Waiting on the links
+    themselves removes the guess.
+    """
+    try:
+        page.wait_for_selector(PROJECT_LINK_SELECTOR, timeout=PROJECTS_TIMEOUT_MS)
+        count = len(page.query_selector_all(PROJECT_LINK_SELECTOR))
+        print(f"  [linksme] dashboard ready — {count} project link(s) (url={page.url!r})")
+        return True
+    except Exception:
+        print(f"  [linksme] no project links after {PROJECTS_TIMEOUT_MS}ms (url={page.url!r})")
+        return False
+
+
+def _report_dashboard_state(page) -> None:
+    """
+    Explain WHY the dashboard has no projects: signed out, rate limited,
+    blocked, or simply changed.
+    """
+    try:
+        body = page.inner_text("body") or ""
+    except Exception:
+        body = ""
+    lowered = body.lower()
+
+    try:
+        has_pw = bool(page.query_selector('input[type="password"]'))
+    except Exception:
+        has_pw = False
+    print(f"  [linksme] url={page.url!r} password_field={has_pw} body_len={len(body)}")
+
+    # A rate limit or temporary block reads very differently from a login wall,
+    # and we have logged in repeatedly today, so name it explicitly if present.
+    for marker in ("too many", "rate limit", "try again later", "temporarily",
+                   "blocked", "suspended", "429", "captcha", "unusual activity",
+                   "maintenance", "session expired", "log in", "sign in"):
+        if marker in lowered:
+            print(f"  [linksme] page mentions {marker!r}")
+
+    print(f"  [linksme] first 400 chars of page text: {body[:400]!r}")
+
+
 # ── Project discovery ──────────────────────────────────────────────────────────
 
 def _parse_project_names(page) -> list[str]:
@@ -433,7 +488,7 @@ def _parse_price(text: str) -> float | None:
     Links.me has moved from USD to EUR: the cell now reads "48.32 EUR". The
     regex below only ever accepted USD/ILS and the € SYMBOL — never the literal
     "EUR" — so every row parsed as None. EUR is handled by the shared parser in
-    eur_price.py, the same one the prnews and collaborator scrapers use, rather
+    eur_price.py, the same one the Collaborator.pro client uses, rather
     than by teaching this regex a second currency.
 
     USD is still tried as a fallback in case any row is still priced in dollars.
@@ -596,12 +651,19 @@ def _get_price_inner(pw, browser, magazine_domain: str, client_name: str, debug:
     page    = context.new_page()
     apply_default_timeouts(context, page)
 
-    # ── 1. Navigate to app ──────────────────────────────────────────────
-    page.goto(BASE_URL, wait_until=NAV_WAIT)
-    _wait(page, 2000)
+    # ── 1. Open the dashboard, logging in if the projects do not appear ──
+    # Auth state is NOT inferred from the landing page any more. That check
+    # ("is there a password field / is the URL /login?") ran 2s after load, so
+    # an SPA that had not yet redirected to /login looked signed-in: _login was
+    # skipped entirely and the project list parsed as empty. The absence of a
+    # "login OK" line in that failure is exactly this path. The dashboard's own
+    # project links are the only trustworthy signal, so wait for those instead.
+    page.goto(f"{BASE_URL}/dashboard", wait_until=NAV_WAIT)
     screenshot(page, "lm_00_home", debug)
 
-    if _is_on_login(page):
+    if not _wait_for_projects(page):
+        print("  [linksme] no projects on the dashboard — signing in")
+        _report_dashboard_state(page)
         try:
             _login(page, debug)
         except (RuntimeError, PlaywrightTimeoutError) as e:
@@ -614,14 +676,18 @@ def _get_price_inner(pw, browser, magazine_domain: str, client_name: str, debug:
                 return _get_price_inner(pw, browser, magazine_domain, client_name, debug, retried_login=True)
             raise
         save_session(context, "linksme")
+        print("  [linksme] session saved after login")
+
+        page.goto(f"{BASE_URL}/dashboard", wait_until=NAV_WAIT)
+        if not _wait_for_projects(page):
+            # Signed in, yet still no projects: a changed dashboard, a block,
+            # or a rate limit. Say which, rather than just reporting "0 projects".
+            print("  [linksme] STILL no projects after a successful login")
+            _report_dashboard_state(page)
+            screenshot(page, "lm_no_projects_after_login_FAILURE", True)
 
     # ── 2. Find project matching client_name ────────────────────────────
     gp_url = _find_guest_posting_url(page, client_name, debug)
-
-    if not gp_url:
-        page.goto(f"{BASE_URL}/dashboard", wait_until=NAV_WAIT)
-        _wait(page, 2000)
-        gp_url = _find_guest_posting_url(page, client_name, debug)
 
     if not gp_url:
         print(f"  [linksme] no project found for '{client_name}'")

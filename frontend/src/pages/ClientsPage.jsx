@@ -18,8 +18,8 @@ const isOtherPub = pub => ['other', 'collaborator', 'prnews'].includes(pub)
 
 const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
 
-// PRNews.io and Collaborator.pro quote in EUR and are never converted, so they
-// render with a € rather than the $ used by PressWhizz and Links.me.
+// Links.me and Collaborator.pro quote in EUR and are never converted, so they
+// render with a € rather than the $ used by PressWhizz.
 const fmtEur = v => (
   v != null
     ? `${Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
@@ -27,13 +27,12 @@ const fmtEur = v => (
 )
 
 // Sources shown for a single-domain lookup, in the same order as the sheet.
-// Links.me quotes in EUR now, so only PressWhizz is still shown in dollars.
+// Links.me and Collaborator quote in EUR, so only PressWhizz is in dollars.
 // This affects the Price Check modal alone — the article cards and task
 // tables keep their existing formatting.
 const PRICE_CHECK_SOURCES = [
   { key: 'price_presswhizz',   label: 'PressWhizz',       eur: false },
   { key: 'price_linksme',      label: 'Links.me',         eur: true  },
-  { key: 'price_prnews',       label: 'PRNews.io',        eur: true  },
   { key: 'price_collaborator', label: 'Collaborator.pro', eur: true  },
 ]
 
