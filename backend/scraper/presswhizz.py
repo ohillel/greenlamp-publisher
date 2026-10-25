@@ -16,7 +16,8 @@ import os
 import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from .browser import save_session, load_session_kwargs, clear_session, apply_default_timeouts, screenshot
+from urllib.parse import urlencode
+from .browser import save_session, load_session_kwargs, clear_session, apply_default_timeouts, screenshot, describe_inputs
 
 BASE_URL  = "https://app.presswhizz.com"
 LOGIN_URL = f"{BASE_URL}/login"
@@ -74,6 +75,85 @@ def _normalize_domain(text: str) -> str:
         if t.startswith(prefix):
             t = t[len(prefix):]
     return t.rstrip('/')
+
+
+def _marketplace_url_for(magazine_domain: str) -> str:
+    """
+    Marketplace URL pre-filtered to one portal.
+
+    The site's own search writes the term into the `portalName` query
+    parameter — visible in the address bar after using the magnifying glass in
+    the Portal column header. Navigating straight to it is far more reliable
+    than finding and driving that icon, and it survives the icon being
+    restyled. _search_via_portal_icon is kept as a fallback.
+    """
+    params = {
+        "offerTypesFilter": "all",
+        "page": "1",
+        "perPage": "25",
+        "sortBy": "default_sort",
+        "dir": "desc",
+        "portalName": magazine_domain,
+    }
+    return f"{BASE_URL}/marketplace?{urlencode(params)}"
+
+
+def _search_via_portal_icon(page, magazine_domain: str, debug: bool) -> bool:
+    """
+    Fallback: drive the magnifying glass in the Portal column header.
+
+    Only used if the URL route above returns nothing, so the selectors here
+    are allowed to be best-effort.
+    """
+    print(f"  [presswhizz] fallback: using the Portal column search icon")
+
+    header = None
+    for sel in ('th:has-text("Portal")', '[role="columnheader"]:has-text("Portal")',
+                'th:has-text("Portal") , td:has-text("Portal")'):
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                header = el
+                break
+        except Exception:
+            continue
+
+    if header is not None:
+        try:
+            icon = header.query_selector(
+                'button, [role="button"], svg, [class*="search" i], [class*="magnif" i], i'
+            )
+            if icon:
+                icon.click()
+                _wait(page, 1200)
+                print("  [presswhizz] clicked the Portal header search icon")
+        except Exception as e:
+            print(f"  [presswhizz] could not click the Portal header icon: {e}")
+
+    for sel in [
+        'input[placeholder*="portal" i]',
+        'input[placeholder*="domain" i]',
+        'input[placeholder*="search" i]',
+        'input[type="search"]',
+        'input[name*="portal" i]',
+    ]:
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                el.fill("")
+                el.fill(magazine_domain)
+                _wait(page, 500)
+                page.keyboard.press("Enter")
+                _wait(page, 3500)
+                print(f"  [presswhizz] fallback search submitted via {sel!r}")
+                return True
+        except Exception:
+            continue
+
+    print("  [presswhizz] fallback: no portal search input found")
+    describe_inputs(page, "presswhizz")
+    screenshot(page, "pw_no_portal_search_FAILURE", True)
+    return False
 
 
 def _fill_domain_filter(page, magazine_domain: str, debug: bool):
@@ -275,67 +355,145 @@ def _parse_price_from_match(m) -> int | None:
         return None
 
 
+def _is_guest_post_cell(text: str) -> bool:
+    """
+    True when an Offer Type cell is a Guest Post.
+
+    The cell holds the type on its first line and any category tags
+    (Crypto / Pharmacy / Loans) beneath it, so only the first line is
+    examined. Tags do NOT disqualify an offer — the cheapest Guest Post wins
+    whether or not it carries them. "Link Insert" must never match.
+    """
+    for line in (text or "").splitlines():
+        line = line.strip().lower()
+        if not line:
+            continue
+        return line.startswith("guest post")
+    return False
+
+
+def _price_from_cells(cells) -> int | None:
+    """First parsable currency amount among a row's cells."""
+    for cell in cells:
+        try:
+            text = cell.inner_text() or ""
+        except Exception:
+            continue
+        for m in _PRICE_RE.finditer(text):
+            val = _parse_price_from_match(m)
+            if val:
+                return val
+    return None
+
+
+def _guest_post_prices_from_table(page) -> list[int]:
+    """
+    Read Guest Post prices from the offers modal's table.
+
+    The modal lists one row per offer with columns
+    Offer Type | Included | Excluded | Duration | Price | Cart.
+    Reading rows directly is safer than scanning page text: a text window that
+    overruns a long Guest Post row would pick up the NEXT row's price, which
+    may well be a Link Insert.
+    """
+    prices: list[int] = []
+    seen_types: list[str] = []
+
+    try:
+        rows = page.query_selector_all('tr')
+    except Exception:
+        return prices
+
+    for row in rows:
+        try:
+            cells = row.query_selector_all('td')
+            if len(cells) < 2:
+                continue
+            offer_type = cells[0].inner_text() or ""
+            first_line = next((l.strip() for l in offer_type.splitlines() if l.strip()), "")
+            if first_line:
+                seen_types.append(first_line)
+            if not _is_guest_post_cell(offer_type):
+                continue
+            val = _price_from_cells(cells[1:])
+            if val:
+                prices.append(val)
+                print(f"  [presswhizz] Guest Post row → {val} (type cell: {first_line!r})")
+            else:
+                print(f"  [presswhizz] Guest Post row with no parsable price: "
+                      f"{row.inner_text()[:160]!r}")
+        except Exception:
+            continue
+
+    if seen_types:
+        print(f"  [presswhizz] offer types seen in the modal: {seen_types}")
+    return prices
+
+
 def _extract_guest_post_prices(page, debug: bool) -> list[int]:
     """
-    After the Offers panel opens, find all 'Guest Post' rows and extract prices.
-
-    PressWhizz uses an inline slide-in panel anchored by 'Offers for:' heading.
-    We read the full page text, slice the offers block, and parse Guest Post lines.
+    All Guest Post prices from the Offers modal. Link Insert is never included,
+    even when cheaper; the caller takes the minimum of what comes back.
     """
-    _wait(page, 2000)
+    _wait(page, 2500)
     screenshot(page, "pw_06_offers_popup", True)
 
     full_text = page.inner_text("body")
-    print(f"  [presswhizz] offers popup: page text is {len(full_text)} chars")
-
+    print(f"  [presswhizz] offers modal: page text is {len(full_text)} chars")
     (Path(__file__).parent / "debug_screenshots" / "pw_popup_text.txt").write_text(
         full_text[-5000:]
     )
 
+    # Preferred: read the modal's table rows.
+    prices = _guest_post_prices_from_table(page)
+    if prices:
+        print(f"  [presswhizz] Guest Post prices from table rows: {prices}")
+        return prices
+
+    # Fallback: the older text-scanning approach, for a non-table layout.
+    print("  [presswhizz] no Guest Post table rows — falling back to text scanning")
+    return _guest_post_prices_from_text(page, full_text)
+
+
+def _guest_post_prices_from_text(page, full_text: str) -> list[int]:
+    """Text-scanning fallback for when the modal is not a <table>."""
     prices: list[int] = []
     lines = full_text.splitlines()
 
-    # Find the offers panel block: starts at "Offers for:" line
     panel_start = None
     for i, line in enumerate(lines):
-        if 'offers for:' in line.lower():
+        low = line.lower()
+        if 'offers for:' in low or 'all offers' in low:
             panel_start = i
             break
 
     if panel_start is None:
-        print("  [presswhizz] 'Offers for:' marker not found in page text — panel may not have "
-              f"opened. Last 600 chars of page text: {full_text[-600:]!r}")
+        print("  [presswhizz] no offers-panel marker in page text — the modal may not have "
+              f"opened. Last 600 chars: {full_text[-600:]!r}")
         return prices
 
-    # Take everything from "Offers for:" onward (max 200 lines)
     panel_lines = lines[panel_start:panel_start + 200]
-    print(f"  [presswhizz] offers panel found at line {panel_start}, scanning {len(panel_lines)} lines")
+    print(f"  [presswhizz] offers panel at line {panel_start}, scanning {len(panel_lines)} lines")
 
-    # Scan panel lines: find each "Guest Post" offer row and read its price
     guest_post_lines_found = 0
-    i = 0
-    while i < len(panel_lines):
-        line = panel_lines[i].strip()
-        # Lines starting with "Guest Post" are offer type rows
-        if re.match(r'guest post', line, re.IGNORECASE):
-            guest_post_lines_found += 1
-            # Rules text spans several lines before the price; use a wide window
-            chunk = '\t'.join(panel_lines[i:i + 15])
-            matched_val = None
-            for m in _PRICE_RE.finditer(chunk):
-                val = _parse_price_from_match(m)
-                if val:
-                    matched_val = val
-                    prices.append(val)
-                    break
-            if matched_val is None:
-                print(f"  [presswhizz] 'Guest Post' line at offset {i} had no parsable price. "
-                      f"Chunk: {chunk[:200]!r}")
-        i += 1
+    for i, raw in enumerate(panel_lines):
+        line = raw.strip()
+        # Must be the START of the line so "Link Insert" can never match.
+        if not re.match(r'guest post', line, re.IGNORECASE):
+            continue
+        guest_post_lines_found += 1
+        chunk = '\t'.join(panel_lines[i:i + 15])
+        for m in _PRICE_RE.finditer(chunk):
+            val = _parse_price_from_match(m)
+            if val:
+                prices.append(val)
+                break
+        else:
+            print(f"  [presswhizz] 'Guest Post' line at offset {i} had no parsable price. "
+                  f"Chunk: {chunk[:200]!r}")
 
     print(f"  [presswhizz] found {guest_post_lines_found} 'Guest Post' line(s), "
           f"extracted prices: {prices}")
-
     return prices
 
 
@@ -381,36 +539,43 @@ def _get_price_inner(pw, browser, magazine_domain: str, debug: bool, retried_log
             raise
         save_session(context, "presswhizz")
 
-    # ── 2. Go to Marketplace ────────────────────────────────────────────
-    page.goto(f"{BASE_URL}/marketplace", wait_until=NAV_WAIT)
-    _wait(page, 2500)
-    screenshot(page, "pw_01_marketplace", debug)
-
-    # ── 3. Fill domain in General Filters ──────────────────────────────
-    filled = _fill_domain_filter(page, magazine_domain, debug)
-    if not filled:
-        screenshot(page, "pw_no_domain_input_FAILURE", True)
-        raise RuntimeError(
-            f"PressWhizz: could not find domain filter input on marketplace. "
-            f"Check debug screenshots."
-        )
-
-    screenshot(page, "pw_02_filter_filled", debug)
-
-    # Press Enter to trigger search / wait for results
-    page.keyboard.press("Enter")
+    # ── 2-3. Marketplace, pre-filtered to this portal ───────────────────
+    # The site's own Portal search writes the term into ?portalName=, so we go
+    # straight there instead of driving the magnifying-glass icon.
+    search_url = _marketplace_url_for(magazine_domain)
+    print(f"  [presswhizz] opening {search_url}")
+    page.goto(search_url, wait_until=NAV_WAIT)
     _wait(page, 3500)
-    screenshot(page, "pw_03_results", debug)
+    try:
+        page.wait_for_load_state("networkidle", timeout=8000)
+    except Exception:
+        pass
+    screenshot(page, "pw_02_search_results", debug)
 
-    # ── 4. Click "Offers" on the matching row ───────────────────────────
+    # ── 4. Click "Offers" on the EXACT-domain row ───────────────────────
+    # The filter is a substring match, so several portals can come back
+    # (techloy.com, blog.techloy.com, techloy.com.ng). _click_offers_for_domain
+    # normalises each row's href and accepts only an exact match.
     found = _click_offers_for_domain(page, magazine_domain, debug)
+
+    if not found:
+        # Fall back to the in-page search icon in case ?portalName= changes.
+        print("  [presswhizz] no exact-domain row from the URL filter — trying the search icon")
+        if _search_via_portal_icon(page, magazine_domain, debug):
+            found = _click_offers_for_domain(page, magazine_domain, debug)
+
     if not found:
         screenshot(page, "pw_no_offers_btn_FAILURE", True)
         return None
 
-    # ── 5. Extract Guest Post prices from popup ─────────────────────────
+    # ── 5. Cheapest Guest Post price from the Offers modal ──────────────
     prices = _extract_guest_post_prices(page, debug)
     if not prices:
+        # No Guest Post offer => no price at all. Link Insert is never used.
+        print(f"  [presswhizz] no Guest Post offer for {magazine_domain!r} — returning no price")
         screenshot(page, "pw_no_prices_FAILURE", True)
+        return None
 
-    return min(prices) if prices else None
+    cheapest = min(prices)
+    print(f"  [presswhizz] {magazine_domain} → cheapest Guest Post {cheapest} of {sorted(prices)}")
+    return cheapest
