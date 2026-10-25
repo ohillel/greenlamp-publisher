@@ -261,29 +261,156 @@ def _report_login_blockers(page) -> None:
 
 # ── Dashboard readiness ────────────────────────────────────────────────────────
 
-# The per-project "Guest Posting Sites List" links. Their presence is the only
-# reliable proof that we are signed in AND the dashboard has finished rendering.
-PROJECT_LINK_SELECTOR = 'a[href*="/catalog/guest-posting"]'
+# Per-project catalog links. These used to be rendered inline on the dashboard
+# (36 projects → 36 links), but a run that clearly showed "MY PROJECTS (39)" and
+# all 39 domains found ZERO of them, so their presence can no longer be the
+# readiness signal — see _wait_for_projects. Several spellings are tried because
+# the path may simply have been renamed.
+PROJECT_LINK_SELECTORS = (
+    'a[href*="/catalog/guest-posting"]',
+    'a[href*="guest-posting"]',
+    'a[href*="guest_posting"]',
+    'a[href*="guest-post"]',
+)
+PROJECT_LINK_SELECTOR = PROJECT_LINK_SELECTORS[0]
+
 PROJECTS_TIMEOUT_MS = 20_000
+_POLL_INTERVAL_MS = 500
+
+
+def _catalog_links(page) -> list[str]:
+    """Every per-project catalog href on the page, trying each known spelling."""
+    for sel in PROJECT_LINK_SELECTORS:
+        try:
+            hrefs = page.eval_on_selector_all(sel, 'els => els.map(e => e.href)')
+        except Exception:
+            continue
+        if hrefs:
+            if sel != PROJECT_LINK_SELECTOR:
+                print(f"  [linksme] catalog links found via fallback selector {sel!r}")
+            return hrefs
+    return []
 
 
 def _wait_for_projects(page) -> bool:
     """
-    Wait for the dashboard's project links to render.
+    Wait for the dashboard's project list to render.
 
-    The project list is loaded by JavaScript after the page load event, so the
-    old fixed `_wait(page, 2000)` was a guess: fast enough an hour ago, too
-    short later, and it reported "0 projects" either way. Waiting on the links
-    themselves removes the guess.
+    Readiness is project NAMES, not catalog links. Waiting on the links was
+    wrong: a dashboard showing "MY PROJECTS (39)" and every domain still had
+    zero matching hrefs, so this returned False, the code concluded it was
+    signed out, threw away a perfectly good session, logged in again, and burnt
+    2 × 20s before the 60s per-site budget killed the lookup.
+
+    Names are parsed from the page text, which the logs prove is populated.
+    Links are still checked because they are the stronger signal when present.
+    """
+    import time
+
+    deadline = time.monotonic() + PROJECTS_TIMEOUT_MS / 1000
+    names: list[str] = []
+    links: list[str] = []
+
+    while True:
+        try:
+            links = _catalog_links(page)
+        except Exception:
+            links = []
+        try:
+            names = _parse_project_names(page)
+        except Exception:
+            names = []
+
+        if names or links:
+            print(f"  [linksme] dashboard ready — {len(names)} project name(s), "
+                  f"{len(links)} catalog link(s) (url={page.url!r})")
+            if names and not links:
+                # Navigation will have to be derived from the row markup.
+                print("  [linksme] NOTE: project names present but no catalog links — "
+                      "dumping the project area so the markup can be seen")
+                _dump_project_area(page)
+            return True
+
+        if time.monotonic() >= deadline:
+            break
+        page.wait_for_timeout(_POLL_INTERVAL_MS)
+
+    print(f"  [linksme] no project names or catalog links after "
+          f"{PROJECTS_TIMEOUT_MS}ms (url={page.url!r})")
+    return False
+
+
+_PROJECT_AREA_JS = """
+() => {
+  const all = Array.from(document.querySelectorAll('*'));
+  const hits = all.filter(e => (e.textContent || '').toUpperCase().includes('MY PROJECTS'));
+  if (!hits.length) return null;
+  // The smallest element containing the heading, then one level out for context.
+  hits.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+  const node = hits[0];
+  const box = node.parentElement ? node.parentElement.parentElement || node.parentElement : node;
+  return box.outerHTML;
+}
+"""
+
+_HREF_CENSUS_JS = """
+() => {
+  const as = Array.from(document.querySelectorAll('a[href]'));
+  const pats = {};
+  for (const a of as) {
+    const h = a.getAttribute('href') || '';
+    const key = h.split('?')[0].split('/').slice(0, 4).join('/') || '(empty)';
+    pats[key] = (pats[key] || 0) + 1;
+  }
+  return {
+    anchors: as.length,
+    patterns: Object.entries(pats).sort((x, y) => y[1] - x[1]).slice(0, 25),
+    clickableNonAnchors: document.querySelectorAll(
+      'button, [role="button"], [onclick], [class*="row" i][tabindex]'
+    ).length,
+  };
+}
+"""
+
+
+def _dump_project_area(page, limit: int = 4000) -> None:
+    """
+    Print the markup around "MY PROJECTS" plus a census of the page's links.
+
+    This is the evidence needed to decide how to reach a project's
+    guest-posting catalog now that inline catalog hrefs have disappeared: it
+    shows whether the rows are anchors with a different path, buttons, or plain
+    text in a clickable container.
     """
     try:
-        page.wait_for_selector(PROJECT_LINK_SELECTOR, timeout=PROJECTS_TIMEOUT_MS)
-        count = len(page.query_selector_all(PROJECT_LINK_SELECTOR))
-        print(f"  [linksme] dashboard ready — {count} project link(s) (url={page.url!r})")
-        return True
-    except Exception:
-        print(f"  [linksme] no project links after {PROJECTS_TIMEOUT_MS}ms (url={page.url!r})")
-        return False
+        census = page.evaluate(_HREF_CENSUS_JS)
+        if not isinstance(census, dict):
+            print(f"  [linksme] href census returned nothing usable ({type(census).__name__})")
+        else:
+            print(f"  [linksme] page has {census.get('anchors')} anchor(s), "
+                  f"{census.get('clickableNonAnchors')} clickable non-anchor element(s)")
+            print("  [linksme] href patterns (prefix → count):")
+            for pattern, count in (census.get("patterns") or []):
+                print(f"      {count:>4}  {pattern}")
+    except Exception as e:
+        print(f"  [linksme] href census failed: {e}")
+
+    try:
+        html = page.evaluate(_PROJECT_AREA_JS)
+    except Exception as e:
+        print(f"  [linksme] could not extract the project area: {e}")
+        return
+    if not html:
+        print("  [linksme] no element containing 'MY PROJECTS' was found")
+        return
+
+    path = Path(__file__).parent / "debug_screenshots" / "lm_project_area.html"
+    try:
+        path.write_text(html[:200_000])
+        print(f"  [linksme] project-area markup written to {path}")
+    except Exception as e:
+        print(f"  [linksme] could not write the project-area markup: {e}")
+    print(f"  [linksme] project-area markup (first {limit} chars):\n{html[:limit]}")
 
 
 def _report_dashboard_state(page) -> None:
@@ -343,10 +470,9 @@ def _find_guest_posting_url(page, client_name: str, debug: bool) -> str | None:
     """
     screenshot(page, "lm_04_projects_list", debug)
 
-    gp_hrefs = page.eval_on_selector_all(
-        'a[href*="/catalog/guest-posting"]',
-        'els => els.map(e => e.href)',
-    )
+    # Tries every known catalog-href spelling rather than the one hardcoded
+    # path, which stopped matching.
+    gp_hrefs = _catalog_links(page)
     project_names = _parse_project_names(page)
 
     print(f"  [linksme] {len(project_names)} projects, {len(gp_hrefs)} catalog links")
@@ -355,7 +481,16 @@ def _find_guest_posting_url(page, client_name: str, debug: bool) -> str | None:
         page.inner_text("body")[:5000]
     )
 
-    if not project_names or not gp_hrefs:
+    if project_names and not gp_hrefs:
+        # The position-matching below needs hrefs. Names without links means the
+        # rows are no longer plain anchors, so dump the markup: that is the
+        # evidence needed to pick a new way in (a renamed path, a button, or a
+        # clickable row).
+        print(f"  [linksme] {len(project_names)} project name(s) but NO catalog links — "
+              f"the dashboard markup has changed")
+        _dump_project_area(page)
+        screenshot(page, "lm_no_catalog_links_FAILURE", True)
+    elif not project_names or not gp_hrefs:
         print(f"  [linksme] WARNING: project_names or gp_hrefs is empty — dashboard "
               f"structure may have changed. project_names={len(project_names)}, "
               f"gp_hrefs={len(gp_hrefs)}")
@@ -390,7 +525,97 @@ def _find_guest_posting_url(page, client_name: str, debug: bool) -> str | None:
               f"one project exists ({project_names[0]}) — using it")
         return gp_hrefs[0]
 
+    # Last resort when the dashboard has names but no catalog hrefs: reach the
+    # catalog the way a person would — click the project, then its "Guest
+    # Posting Sites List" nav item. This uses the visible LABEL rather than a
+    # guessed URL, so it survives the path being renamed.
+    if project_names and not gp_hrefs:
+        clicked = _navigate_by_click(page, client_name, project_names, debug)
+        if clicked:
+            return clicked
+
     print(f"  [linksme] no match for '{client_name}' among projects: {project_names}")
+    return None
+
+
+# The per-project nav item that opens the guest-posting catalog. Matched on its
+# visible text, which is stable across URL changes.
+GUEST_POSTING_LABEL = "Guest Posting Sites List"
+
+
+def _pick_project_name(client_name: str, project_names: list[str]) -> str | None:
+    """Same exact → partial → fuzzy order used for href matching."""
+    target = client_name.lower()
+    for name in project_names:
+        if name.lower() == target:
+            return name
+    for name in project_names:
+        if target in name.lower() or name.lower() in target:
+            return name
+    parts = [p for p in re.split(r'[\s._-]+', target) if len(p) > 3]
+    for name in project_names:
+        if any(p in name.lower() for p in parts):
+            return name
+    return None
+
+
+def _navigate_by_click(page, client_name: str, project_names: list[str],
+                       debug: bool) -> str | None:
+    """
+    Click through to a project's guest-posting catalog and return the URL.
+
+    Used when the dashboard lists projects without catalog hrefs. Returns the
+    landed URL on success, or None — in which case the markup dump from
+    _dump_project_area is the evidence needed to fix this properly.
+    """
+    name = _pick_project_name(client_name, project_names)
+    if not name:
+        print(f"  [linksme] click-through: no project name matches '{client_name}'")
+        return None
+
+    print(f"  [linksme] click-through: opening project {name!r}")
+    try:
+        page.click(f'text="{name}"', timeout=8000)
+        _wait(page, 2500)
+        try:
+            page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
+        print(f"  [linksme] click-through: now at {page.url!r}")
+    except Exception as e:
+        print(f"  [linksme] click-through: could not click {name!r}: {e}")
+        screenshot(page, "lm_click_project_FAILURE", True)
+        return None
+
+    # Prefer the catalog link if the project page exposes one.
+    hrefs = _catalog_links(page)
+    if hrefs:
+        print(f"  [linksme] click-through: catalog link on the project page → {hrefs[0]}")
+        return hrefs[0]
+
+    # Otherwise click the nav item by its label.
+    for sel in (f'a:has-text("{GUEST_POSTING_LABEL}")',
+                f'button:has-text("{GUEST_POSTING_LABEL}")',
+                f'text="{GUEST_POSTING_LABEL}"'):
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                el.click()
+                _wait(page, 2500)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+                print(f"  [linksme] click-through: opened the catalog via {sel!r} "
+                      f"→ {page.url!r}")
+                return page.url
+        except Exception:
+            continue
+
+    print(f"  [linksme] click-through: no {GUEST_POSTING_LABEL!r} nav item on "
+          f"{page.url!r}")
+    _dump_project_area(page)
+    screenshot(page, "lm_no_gp_nav_FAILURE", True)
     return None
 
 
