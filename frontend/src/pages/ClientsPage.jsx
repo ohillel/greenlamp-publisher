@@ -275,6 +275,9 @@ export default function ClientsPage() {
   // fetchers above keep their role guards and those roles' data paths are
   // untouched.
   const [orView,            setOrView]            = useState('attention')
+  // Article ids whose re-check request is still in flight (not the scrape
+  // itself — that is reported by the row's own prices_checked_at).
+  const [refetching,        setRefetching]        = useState(() => new Set())
   const [orPublisherTasks,  setOrPublisherTasks]  = useState([])
   const [orDeniseTasks,     setOrDeniseTasks]     = useState([])
 
@@ -687,6 +690,31 @@ export default function ClientsPage() {
     onDelete: deleteClient,
   }
 
+  // Re-run the price fetch for one article. The backend clears the stored
+  // prices before it starts, and that write reaches this table through the
+  // articles realtime channel, so the row switches to "Fetching…" on its own —
+  // nothing to update optimistically here beyond disabling the button.
+  const refetchPrices = async (articleId) => {
+    setRefetching(prev => new Set(prev).add(articleId))
+    try {
+      const res = await fetch(`${API_BASE}/api/prices/refetch`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ article_id: articleId }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch (e) {
+      console.error('[refetch prices] failed:', e)
+      alert('Could not start the price check. Please try again.')
+    } finally {
+      setRefetching(prev => {
+        const next = new Set(prev)
+        next.delete(articleId)
+        return next
+      })
+    }
+  }
+
   // Or table row
   const renderOrRow = (article, i) => {
     const effPub  = article.chosen_publisher || article.preferred_publisher
@@ -722,15 +750,27 @@ export default function ClientsPage() {
           {stillFetching
             ? <span className="price-fetching-inline"><span className="price-spinner" /> Fetching…</span>
             : (
-              <span className="price-compare" title={article.price_fetch_error || undefined}>
-                {quotes.map(q => (
-                  <span key={q.key} className={`price-compare-row${q.chosen ? ' is-chosen' : ''}`}>
-                    <span className="price-compare-src">{q.short}</span>
-                    <span className="price-compare-val">
-                      {(q.eur ? fmtEur(q.value) : fmtPrice(q.value)) ?? '—'}
+              <span className="price-compare-cell">
+                <span className="price-compare" title={article.price_fetch_error || undefined}>
+                  {quotes.map(q => (
+                    <span key={q.key} className={`price-compare-row${q.chosen ? ' is-chosen' : ''}`}>
+                      <span className="price-compare-src">{q.short}</span>
+                      <span className="price-compare-val">
+                        {(q.eur ? fmtEur(q.value) : fmtPrice(q.value)) ?? '—'}
+                      </span>
                     </span>
-                  </span>
-                ))}
+                  ))}
+                </span>
+                <button
+                  type="button"
+                  className="price-refetch-btn"
+                  title="Check prices again"
+                  aria-label="Check prices again"
+                  disabled={refetching.has(article.id)}
+                  onClick={e => { e.stopPropagation(); refetchPrices(article.id) }}
+                >
+                  ↻
+                </button>
               </span>
             )}
         </td>

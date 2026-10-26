@@ -1315,6 +1315,30 @@ body {
   color: var(--text);
   font-weight: 700;
 }
+.price-compare-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.price-refetch-btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color .12s, border-color .12s;
+}
+.price-refetch-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+.price-refetch-btn:disabled { cursor: default; opacity: .4; }
 
 /* ── Row action popup ── */
 .row-action-popup {

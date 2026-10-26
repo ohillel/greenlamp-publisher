@@ -317,6 +317,58 @@ async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> 
             print(f"[bg_prices] failed to record error for article {article_id}: {e2}")
 
 
+class RefetchPricesRequest(BaseModel):
+    article_id: str
+
+
+@app.post("/api/prices/refetch")
+async def refetch_prices(req: RefetchPricesRequest, background_tasks: BackgroundTasks):
+    """
+    Re-run the price fetch for a single article.
+
+    The fetch otherwise happens exactly once, when the article is submitted, so
+    an article whose scrape timed out keeps an empty price row forever and one
+    submitted before a source was added never gets that source at all. This
+    endpoint is the way out of both.
+
+    The stored prices and prices_checked_at are cleared first: that is what the
+    dashboard reads as "fetching", and clearing it reaches the open tables
+    through the articles realtime channel, so the spinner appears right away.
+    """
+    sb = _sb()
+    res = sb.from_("articles") \
+            .select("id, magazine") \
+            .eq("id", req.article_id) \
+            .execute()
+    rows = res.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="article not found")
+    article = rows[0]
+    magazine = article.get("magazine")
+    if not magazine:
+        raise HTTPException(status_code=422, detail="article has no magazine to look up")
+
+    sb.from_("articles").update({
+        "price_presswhizz":   None,
+        "price_linksme":      None,
+        "price_collaborator": None,
+        "prices_checked_at":  None,
+        "price_fetch_error":  None,
+    }).eq("id", req.article_id).execute()
+
+    print(f"[api/prices/refetch] article={req.article_id} magazine={magazine!r}")
+    # The client name only reaches _bg_fetch_prices' log line — Links.me is
+    # always looked up under the "apiiro" project — so it is not worth a second
+    # query here.
+    background_tasks.add_task(
+        _bg_fetch_prices,
+        req.article_id,
+        extract_domain(magazine).lower(),
+        "",
+    )
+    return {"ok": True}
+
+
 class NotifyRequest(BaseModel):
     event:       str        # 'submitted' | 'approved' | 'sent' | 'returned' | 'published' | 'not_published'
     client_name: str
