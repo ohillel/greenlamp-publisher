@@ -280,11 +280,21 @@ async def push_subscribe(req: PushSubscribeRequest):
 
 # Each price fetch spawns 2 headless Playwright browsers (PressWhizz +
 # Links.me; Collaborator is a plain API call and costs nothing here).
-# Railway's resources get exhausted when several articles are
-# submitted at once and all their fetches run concurrently — this caps how
-# many _bg_fetch_prices calls actually run at the same time; the rest queue
-# and run as slots free up.
-_PRICE_FETCH_SEMAPHORE = asyncio.Semaphore(2)
+# Railway's resources get exhausted when several articles are submitted at
+# once and all their fetches run concurrently — this caps how many
+# _bg_fetch_prices calls actually run at the same time; the rest queue and run
+# as slots free up.
+#
+# One, not two. At two, a pair of fetches puts four Chromium instances on one
+# Railway container, and PressWhizz then loses its 60s race: two re-checks
+# started a second apart on 26 Oct both came back
+# "presswhizz: timed out after 60s" while Links.me, in the same runs,
+# succeeded. The Price Check tool never hits this — it holds a single slot for
+# its whole batch and walks the domains one at a time, which is why the same
+# domain prices fine there and times out here. Matching that gives the
+# per-article path the two-browser ceiling that demonstrably works; several
+# articles submitted together now queue instead of starving each other.
+_PRICE_FETCH_SEMAPHORE = asyncio.Semaphore(1)
 
 
 async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> None:
