@@ -28,7 +28,7 @@ from scraper.email_notifications import (  # noqa: E402
 )
 from scraper.bulk_price_check import check_prices_bulk                                            # noqa: E402
 from scraper.sheets_export import create_price_check_sheet                                        # noqa: E402
-from scraper import presswhizz, linksme                                                            # noqa: E402
+from scraper import presswhizz, linksme, collaborator                                              # noqa: E402
 
 
 def _sb():
@@ -212,9 +212,14 @@ class PriceCheckTestRequest(BaseModel):
 async def price_check_test(req: PriceCheckTestRequest = PriceCheckTestRequest()):
     """
     Diagnostic endpoint: runs a single domain (default "trinituner.com") through
-    both PressWhizz and Links.me (default client "mstone") and returns every log
-    line printed during the run, so selector/flow issues can be diagnosed without
-    Railway log access. Does not touch the per-article scraping flow.
+    all three sources (Links.me under the default client "mstone") and returns
+    every log line printed during the run, so selector/flow issues can be
+    diagnosed without Railway log access. Does not touch the per-article
+    scraping flow.
+
+    The three run one after another, each on its own, so a result here is free
+    of the resource contention a concurrent article fetch would add — which is
+    what makes it a useful control when a source times out in production.
     """
     domain = req.domain
     client_name = req.client_name
@@ -226,12 +231,19 @@ async def price_check_test(req: PriceCheckTestRequest = PriceCheckTestRequest())
     lm_result = await run_in_threadpool(
         _run_with_captured_logs, linksme.get_price, domain, client_name, True
     )
+    # Collaborator returns None on every failure path — missing API key, no
+    # matching domain, no Article format — so the number alone cannot say which
+    # happened. Its log lines can.
+    co_result = await run_in_threadpool(
+        _run_with_captured_logs, collaborator.get_price_detailed, domain, True
+    )
 
     return {
         "domain": domain,
         "client_name": client_name,
         "presswhizz": pw_result,
         "linksme": lm_result,
+        "collaborator": co_result,
     }
 
 
