@@ -222,6 +222,21 @@ def _fill_domain_filter(page, magazine_domain: str, debug: bool):
     return True
 
 
+# The Portal cell of one results row, as {href, text}. textContent rather than
+# innerText because the domain lives in a child <span> whose <a> renders empty.
+_ROW_PORTAL_JS = """
+row => {
+    const cell = row.querySelector('td');
+    if (!cell) return null;
+    const link = cell.querySelector('a');
+    return {
+        href: link ? (link.getAttribute('href') || '') : '',
+        text: (cell.textContent || '').replace(/\\s+/g, ' ').trim(),
+    };
+}
+"""
+
+
 def _click_offers_for_domain(page, magazine_domain: str, debug: bool) -> bool:
     """
     Find the result row whose Portal cell matches magazine_domain and click Offers.
@@ -279,31 +294,42 @@ def _click_offers_for_domain(page, magazine_domain: str, debug: bool) -> bool:
         except Exception as e:
             print(f"  [presswhizz] strategy1 error: {e}")
 
-    # Strategy 2: <tr>/<td> — match Portal cell by inner_text (text-based tables)
-    checked_texts = []
+    # Strategy 2: <tr>/<td> — match the Portal cell by its text.
+    #
+    # Read it with textContent, never inner_text(): the domain sits in a child
+    # <span> of the <a>, and inner_text() on that <a> comes back empty — the
+    # very thing this function's docstring warns about. Reading it the wrong
+    # way made every row look blank ("first-cell texts seen: ['', '', …]"),
+    # so no row could ever match. The row's own href is taken as a second
+    # candidate, since whichever of the two carries the domain is enough.
+    checked = []
     for row in all_rows:
-        cells = row.query_selector_all('td')
-        if not cells:
-            continue
         try:
-            link = cells[0].query_selector('a')
-            raw = link.inner_text() if link else cells[0].inner_text()
-            normalized_raw = _normalize_domain(raw)
-            checked_texts.append(normalized_raw)
-            if normalized_raw != domain_lower:
-                continue
-            btn = row.query_selector('button:has-text("Offers")')
-            if btn:
-                btn.click()
-                print(f"  [presswhizz] clicked Offers via <tr> text match (cell text: {raw!r})")
-                return True
-            else:
-                print(f"  [presswhizz] strategy2: row text '{raw}' matches domain but no "
-                      f"'Offers' button found in that row")
+            portal = row.evaluate(_ROW_PORTAL_JS)
         except Exception:
-            pass
-    if checked_texts:
-        print(f"  [presswhizz] strategy2: first-cell texts seen across rows: {checked_texts[:20]}")
+            continue
+        if not portal:
+            continue
+        text = portal.get('text') or ''
+        # The cell can carry more than the domain (a title, DR, traffic), so
+        # each whitespace-separated token is tested on its own. Matching stays
+        # exact per token: blog.example.com never passes for example.com.
+        candidates = {_normalize_domain(portal.get('href') or '')}
+        candidates.update(_normalize_domain(tok) for tok in text.split())
+        checked.append(text or portal.get('href') or '')
+        if domain_lower not in candidates:
+            continue
+        btn = row.query_selector('button:has-text("Offers")')
+        if btn:
+            btn.click()
+            print(f"  [presswhizz] clicked Offers via <tr> match (portal cell: {portal!r})")
+            return True
+        print(f"  [presswhizz] strategy2: row {portal!r} matches domain but no "
+              f"'Offers' button found in that row")
+    if checked:
+        # The portals actually on the page, so a domain PressWhizz simply does
+        # not carry can be told apart from one the matching missed.
+        print(f"  [presswhizz] strategy2: portal cells seen across rows: {checked[:20]}")
 
     # Strategy 3: single result — click the only <button> whose exact text is "Offers"
     # (the filter already scoped results to this domain, so there should be just one)
