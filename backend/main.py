@@ -267,7 +267,8 @@ async def push_subscribe(req: PushSubscribeRequest):
 
 
 # Each price fetch spawns 2 headless Playwright browsers (PressWhizz +
-# Links.me). Railway's resources get exhausted when several articles are
+# Links.me; Collaborator is a plain API call and costs nothing here).
+# Railway's resources get exhausted when several articles are
 # submitted at once and all their fetches run concurrently — this caps how
 # many _bg_fetch_prices calls actually run at the same time; the rest queue
 # and run as slots free up.
@@ -297,12 +298,14 @@ async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> 
             result = await run_in_threadpool(fetch_prices, magazine, linksme_client_name)
         errors = result.get("errors")
         sb.from_("articles").update({
-            "price_presswhizz":  result.get("presswhizz"),
-            "price_linksme":     result.get("linksme"),
+            "price_presswhizz":   result.get("presswhizz"),
+            "price_linksme":      result.get("linksme"),
+            "price_collaborator": result.get("collaborator"),
             "prices_checked_at": datetime.now(timezone.utc).isoformat(),
             "price_fetch_error": "; ".join(f"{k}: {v}" for k, v in errors.items()) if errors else None,
         }).eq("id", article_id).execute()
-        print(f"[bg_prices] saved — pw={result.get('presswhizz')} lm={result.get('linksme')} errors={errors}")
+        print(f"[bg_prices] saved — pw={result.get('presswhizz')} lm={result.get('linksme')} "
+              f"co={result.get('collaborator')} errors={errors}")
     except Exception as e:
         print(f"[bg_prices] ERROR for article {article_id}: {e}")
         try:

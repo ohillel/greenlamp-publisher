@@ -36,6 +36,16 @@ const PRICE_CHECK_SOURCES = [
   { key: 'price_collaborator', label: 'Collaborator.pro', eur: true  },
 ]
 
+// The three sources compared in the dashboard's Prices column. `pub` is the
+// publisher value that marks a source as the one Denise chose; PressWhizz
+// quotes in dollars while the other two quote in euros, and nothing is
+// converted, so no "cheapest" is marked — that would need an exchange rate.
+const PRICE_COMPARE_SOURCES = [
+  { key: 'price_presswhizz',   short: 'PW', pub: 'presswhizz',   eur: false },
+  { key: 'price_linksme',      short: 'LM', pub: 'linksme',      eur: true  },
+  { key: 'price_collaborator', short: 'CO', pub: 'collaborator', eur: true  },
+]
+
 const fmtDate = dateStr => {
   if (!dateStr) return '—'
   return new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -457,7 +467,7 @@ export default function ClientsPage() {
 
   const refreshOrArticles = useCallback(async () => {
     if (role !== 'or') return
-    const cols = 'id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, assigned_to, price_presswhizz, price_linksme, clients(name)'
+    const cols = 'id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, assigned_to, price_presswhizz, price_linksme, price_collaborator, clients(name)'
     const [submittedRes, approvedOrRes] = await Promise.all([
       supabase.from('articles').select(cols).eq('status', 'submitted').order('created_at', { ascending: true }),
       supabase.from('articles').select(cols).eq('status', 'approved').eq('assigned_to', 'or').order('created_at', { ascending: true }),
@@ -680,14 +690,15 @@ export default function ClientsPage() {
   // Or table row
   const renderOrRow = (article, i) => {
     const effPub  = article.chosen_publisher || article.preferred_publisher
-    const isOther = isOtherPub(effPub)
-    const pw = article.price_presswhizz
-    const lm = article.price_linksme
-    const priceStr = isOther ? null
-      : (pw == null && lm == null)
-        ? null
-        : [pw != null && `PressWhizz: ${fmtPrice(pw)}`, lm != null && `Links.me: ${fmtPrice(lm)}`]
-            .filter(Boolean).join(' | ')
+    // All three sources are shown side by side regardless of which publisher
+    // was chosen — the point of the column is the comparison. The chosen one
+    // is marked so it still reads at a glance.
+    const quotes = PRICE_COMPARE_SOURCES.map(src => ({
+      ...src,
+      value: article[src.key],
+      chosen: src.pub === effPub,
+    }))
+    const anyPrice = quotes.some(q => q.value != null)
     const rowClass = article.status === 'approved' ? 'status-approved' : 'status-submitted'
     return (
       <tr key={article.id} className={`pending-article-row ${rowClass}`} onClick={e => handleRowClick(e, article)}>
@@ -704,11 +715,20 @@ export default function ClientsPage() {
           <span className={effPub ? 'pub-tag' : 'cf-empty'}>{PUB_LABEL[effPub] ?? '—'}</span>
         </td>
         <td className="col-prices">
-          {isOther
-            ? <span className="cf-empty">—</span>
-            : priceStr == null
-              ? <span className="price-fetching-inline"><span className="price-spinner" /> Fetching…</span>
-              : <span>{priceStr}</span>}
+          {!anyPrice
+            ? <span className="price-fetching-inline"><span className="price-spinner" /> Fetching…</span>
+            : (
+              <span className="price-compare">
+                {quotes.map(q => (
+                  <span key={q.key} className={`price-compare-row${q.chosen ? ' is-chosen' : ''}`}>
+                    <span className="price-compare-src">{q.short}</span>
+                    <span className="price-compare-val">
+                      {(q.eur ? fmtEur(q.value) : fmtPrice(q.value)) ?? '—'}
+                    </span>
+                  </span>
+                ))}
+              </span>
+            )}
         </td>
       </tr>
     )

@@ -1290,6 +1290,32 @@ body {
   font-size: 12px;
 }
 
+/* ── Prices column: PressWhizz / Links.me / Collaborator side by side ── */
+.price-compare {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+}
+.price-compare-row {
+  display: grid;
+  grid-template-columns: 22px auto;
+  gap: 6px;
+  align-items: baseline;
+}
+.price-compare-src {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.price-compare-val { font-variant-numeric: tabular-nums; }
+.price-compare-row.is-chosen .price-compare-src,
+.price-compare-row.is-chosen .price-compare-val {
+  color: var(--text);
+  font-weight: 700;
+}
+
 /* ── Row action popup ── */
 .row-action-popup {
   background: var(--surface);

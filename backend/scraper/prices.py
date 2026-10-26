@@ -1,8 +1,9 @@
 """
-Orchestrator: fetch prices from both PressWhizz and Links.me concurrently.
+Orchestrator: fetch prices from PressWhizz, Links.me and Collaborator.pro
+concurrently.
 """
 import concurrent.futures
-from . import presswhizz, linksme
+from . import presswhizz, linksme, collaborator
 
 # Hard ceiling per site. Native threads can't be force-killed once started,
 # but bounding future.result() ensures fetch_prices() — and therefore the
@@ -17,12 +18,13 @@ def fetch_prices(magazine_domain: str, client_name: str, debug: bool = False) ->
     """
     Returns:
         {
-            "presswhizz": <int or None>,
-            "linksme":    <int or None>,
-            "errors":     { "presswhizz": "...", "linksme": "..." }   # only on failure
+            "presswhizz":   <int or None>,     # USD
+            "linksme":      <float or None>,   # EUR
+            "collaborator": <float or None>,   # EUR (via their public API)
+            "errors":       { "<site>": "..." }   # only on failure
         }
     """
-    result = {"presswhizz": None, "linksme": None, "errors": {}}
+    result = {"presswhizz": None, "linksme": None, "collaborator": None, "errors": {}}
 
     def run_presswhizz():
         return presswhizz.get_price(magazine_domain, debug=debug)
@@ -30,17 +32,25 @@ def fetch_prices(magazine_domain: str, client_name: str, debug: bool = False) ->
     def run_linksme():
         return linksme.get_price(magazine_domain, client_name, debug=debug)
 
+    def run_collaborator():
+        return collaborator.get_price(magazine_domain, debug=debug)
+
     # Deliberately not using `with ThreadPoolExecutor(...) as executor:` —
     # the context manager's __exit__ calls shutdown(wait=True), which would
     # block on a still-running thread regardless of the per-future timeout
     # below, defeating the whole point of bounding the wait. shutdown(wait=False)
     # lets us return promptly and abandon any thread still stuck past its timeout.
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
     try:
         pw_future = executor.submit(run_presswhizz)
         lm_future = executor.submit(run_linksme)
+        # Collaborator is a plain HTTP API call — no browser, so it adds no
+        # memory pressure next to the two Playwright fetches.
+        co_future = executor.submit(run_collaborator)
 
-        for site, future in [("presswhizz", pw_future), ("linksme", lm_future)]:
+        for site, future in [("presswhizz", pw_future),
+                             ("linksme", lm_future),
+                             ("collaborator", co_future)]:
             try:
                 result[site] = future.result(timeout=PER_SITE_TIMEOUT_SECONDS)
             except concurrent.futures.TimeoutError:
