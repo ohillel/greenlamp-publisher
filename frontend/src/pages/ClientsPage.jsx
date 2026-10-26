@@ -467,7 +467,7 @@ export default function ClientsPage() {
 
   const refreshOrArticles = useCallback(async () => {
     if (role !== 'or') return
-    const cols = 'id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, assigned_to, price_presswhizz, price_linksme, price_collaborator, clients(name)'
+    const cols = 'id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, assigned_to, price_presswhizz, price_linksme, price_collaborator, prices_checked_at, price_fetch_error, clients(name)'
     const [submittedRes, approvedOrRes] = await Promise.all([
       supabase.from('articles').select(cols).eq('status', 'submitted').order('created_at', { ascending: true }),
       supabase.from('articles').select(cols).eq('status', 'approved').eq('assigned_to', 'or').order('created_at', { ascending: true }),
@@ -698,7 +698,11 @@ export default function ClientsPage() {
       value: article[src.key],
       chosen: src.pub === effPub,
     }))
-    const anyPrice = quotes.some(q => q.value != null)
+    // The fetch runs once, in the background, right after submission. It is
+    // over the moment prices_checked_at is stamped — which happens on failure
+    // too. Keying the spinner on "no prices yet" instead would leave a row
+    // whose fetch found nothing spinning forever.
+    const stillFetching = article.prices_checked_at == null
     const rowClass = article.status === 'approved' ? 'status-approved' : 'status-submitted'
     return (
       <tr key={article.id} className={`pending-article-row ${rowClass}`} onClick={e => handleRowClick(e, article)}>
@@ -715,10 +719,10 @@ export default function ClientsPage() {
           <span className={effPub ? 'pub-tag' : 'cf-empty'}>{PUB_LABEL[effPub] ?? '—'}</span>
         </td>
         <td className="col-prices">
-          {!anyPrice
+          {stillFetching
             ? <span className="price-fetching-inline"><span className="price-spinner" /> Fetching…</span>
             : (
-              <span className="price-compare">
+              <span className="price-compare" title={article.price_fetch_error || undefined}>
                 {quotes.map(q => (
                   <span key={q.key} className={`price-compare-row${q.chosen ? ' is-chosen' : ''}`}>
                     <span className="price-compare-src">{q.short}</span>
