@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
@@ -340,6 +340,53 @@ async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> 
             print(f"[bg_prices] failed to record error for article {article_id}: {e2}")
 
 
+def _import_price_file(source: str, content: bytes, filename: str) -> None:
+    """Background half of an upload: parse, replace, and record the outcome."""
+    sb = _sb()
+    try:
+        summary = price_catalog.sync_from_file(sb, source, content, filename)
+        print(f"[publisher-prices/upload] {summary}")
+    except Exception as e:
+        print(f"[publisher-prices/upload] {source} FAILED: {e}")
+        try:
+            price_catalog.mark_failed(sb, source, filename, str(e))
+        except Exception as e2:
+            print(f"[publisher-prices/upload] could not record the error: {e2}")
+
+
+@app.post("/api/publisher-prices/upload")
+async def upload_publisher_prices(
+    background_tasks: BackgroundTasks,
+    source: str = Form(...),
+    file: UploadFile = File(...),
+):
+    """
+    Load one publisher's magazine/price list from an uploaded CSV or TSV,
+    replacing what was held for that source. Or-only, enforced on the frontend
+    like the other Or-only endpoints.
+
+    The catalogs run to hundreds of thousands of rows, so the import runs in
+    the background and this returns at once; the source is marked 'syncing'
+    until it finishes, and /status reports when it lands. A failed import
+    leaves the previous prices untouched.
+    """
+    src = (source or "").strip().lower()
+    if src not in price_catalog.SOURCES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"source must be one of {', '.join(price_catalog.SOURCES)}",
+        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="the uploaded file is empty")
+
+    filename = file.filename or "upload"
+    price_catalog.mark_syncing(_sb(), src, filename)
+    print(f"[publisher-prices/upload] {src}: queued {filename} ({len(content)} bytes)")
+    background_tasks.add_task(_import_price_file, src, content, filename)
+    return {"ok": True, "source": src, "filename": filename, "status": "syncing"}
+
+
 class SyncPriceSheetRequest(BaseModel):
     source:    str   # 'linksme' | 'prnews' | 'collaborator'
     sheet_url: str
@@ -394,6 +441,8 @@ async def publisher_prices_status():
             {
                 "source":         s,
                 "sheet_url":      (by_source.get(s) or {}).get("sheet_url"),
+                "source_label":   (by_source.get(s) or {}).get("source_label"),
+                "status":         (by_source.get(s) or {}).get("status"),
                 "last_synced_at": (by_source.get(s) or {}).get("last_synced_at"),
                 "row_count":      (by_source.get(s) or {}).get("row_count"),
                 "last_error":     (by_source.get(s) or {}).get("last_error"),

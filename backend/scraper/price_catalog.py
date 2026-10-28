@@ -13,6 +13,8 @@ A sync REPLACES everything held for that source, so a magazine dropped from
 the sheet disappears instead of lingering at a stale price. A domain missing
 from the sheet simply has no price; nothing falls back to scraping.
 """
+import csv
+import io
 import os
 import re
 import sys
@@ -22,18 +24,27 @@ from .eur_price import normalize_amount
 
 SOURCES = ("linksme", "prnews", "collaborator")
 
-# What a sheet's prices are in when the cells carry no currency marker of
-# their own. Links.me and Collaborator quote in euros, PRNews in dollars.
+# What a source's prices are in when the cells carry no currency marker of
+# their own. All three catalogs are supplied in USD and nothing converts
+# between currencies anywhere in this codebase — the figures are stored and
+# shown exactly as given.
 DEFAULT_CURRENCY = {
-    "linksme":      "EUR",
+    "linksme":      "USD",
     "prnews":       "USD",
-    "collaborator": "EUR",
+    "collaborator": "USD",
 }
 
-# Sanity window, matching the scrapers: a year, a row id or a traffic figure
-# picked out of the wrong column cannot pass as a price.
-MIN_PRICE = 1
-MAX_PRICE = 100_000
+# Sanity window. Far wider than the scrapers': they read prices out of page
+# text, where a year or an element id sitting nearby could pass for one, so a
+# tight window earned its keep. A supplied file has a price column and nothing
+# to confuse it with, and a tight window only destroys real data — at 1..100k
+# it dropped economist.com at $117,130.20 and nytimes.com at $194,670 from the
+# PRNews catalog, and 19 sites priced under a dollar from Collaborator.
+#
+# What guards against a misread column is the header detection, plus the price
+# range reported back after every import.
+MIN_PRICE = 0.01
+MAX_PRICE = 1_000_000
 
 # Header names worth trusting, lowercased. Checked as substrings, most
 # specific first, so "price usd" beats a bare "url".
@@ -73,7 +84,26 @@ def normalize_domain(text: str) -> str:
     return t.strip().rstrip(".")
 
 
-def parse_price_cell(raw: str) -> tuple[float | None, str | None]:
+def detect_decimal_style(samples: list[str]) -> str:
+    """
+    "comma" if this file writes decimals European-style (113,40), else "dot".
+
+    Decided once per file rather than per cell, because a single value cannot
+    be read reliably on its own: "516.864" is 516.864 in a dollar export and
+    516864 in a European one. Guessing per cell is what dropped 32,371 of the
+    233,820 Links.me rows — every price with three decimal places looked like
+    a thousands separator and was discarded for exceeding MAX_PRICE.
+
+    A comma followed by one or two final digits is the giveaway, since no
+    thousands separator is ever followed by fewer than three.
+    """
+    for s in samples:
+        if re.search(r",\d{1,2}\s*(?:[A-Za-z€$£₪]|$)", (s or "").strip()):
+            return "comma"
+    return "dot"
+
+
+def parse_price_cell(raw: str, style: str = "comma") -> tuple[float | None, str | None]:
     """
     ("113,40 EUR") -> (113.4, "EUR"); ("$1,250") -> (1250.0, "USD").
 
@@ -105,7 +135,16 @@ def parse_price_cell(raw: str) -> tuple[float | None, str | None]:
     m = re.search(r"\d[\d.,]*", digits)
     if not m:
         return None, None
-    value = normalize_amount(m.group(0).strip())
+    number = m.group(0).strip()
+    if style == "dot":
+        # Dots are decimal points and commas group thousands, so 516.864 keeps
+        # its three decimals instead of becoming half a million.
+        try:
+            value = float(number.replace(",", "").rstrip("."))
+        except ValueError:
+            value = None
+    else:
+        value = normalize_amount(number)
     if value is None or not (MIN_PRICE <= value <= MAX_PRICE):
         return None, None
     return round(value, 2), currency
@@ -159,13 +198,17 @@ def parse_rows(rows: list[list[str]], source: str) -> dict:
         body = rows
 
     default_currency = DEFAULT_CURRENCY.get(source)
+    # Settled once, from the file's own price column, before any row is read.
+    style = detect_decimal_style(
+        [row[p_idx] for row in body[:5000] if len(row) > p_idx]
+    )
     best: dict[str, dict] = {}
     skipped = 0
 
     for row in body:
         domain = normalize_domain(row[d_idx]) if len(row) > d_idx else ""
         raw_price = row[p_idx] if len(row) > p_idx else ""
-        price, currency = parse_price_cell(raw_price)
+        price, currency = parse_price_cell(raw_price, style)
         if not domain or "." not in domain or price is None:
             skipped += 1
             continue
@@ -179,7 +222,30 @@ def parse_rows(rows: list[list[str]], source: str) -> dict:
         "skipped": skipped,
         "header": header,
         "columns": (d_idx, p_idx),
+        "decimal_style": style,
     }
+
+
+def read_delimited(content: bytes | str) -> list[list[str]]:
+    """
+    An uploaded CSV/TSV as rows of strings.
+
+    The delimiter is sniffed from the header rather than taken from the file
+    extension, which is routinely wrong — the catalogs arrived as one comma
+    file named .csv, one tab file named .tsv, and nothing guarantees the next
+    one matches its name.
+    """
+    if isinstance(content, bytes):
+        text = content.decode("utf-8-sig", errors="replace")
+    else:
+        text = content
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    first_line = next((ln for ln in text.split("\n") if ln.strip()), "")
+    delimiter = "\t" if first_line.count("\t") > first_line.count(",") else ","
+
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    return [[(c or "").strip() for c in row] for row in reader if any((c or "").strip() for c in row)]
 
 
 def read_sheet_values(spreadsheet_id: str) -> list[list[str]]:
@@ -202,16 +268,96 @@ def read_sheet_values(spreadsheet_id: str) -> list[list[str]]:
     return [[str(c) for c in row] for row in (resp.get("values") or [])]
 
 
-def sync_source(sb, source: str, sheet_url: str) -> dict:
-    """
-    Pull `sheet_url` into publisher_prices for `source`, replacing what was
-    there, and record the outcome on publisher_price_sheets.
+# Rows per insert request. Large enough that a 230k-row catalog is a few
+# hundred requests rather than a few thousand, small enough to stay well
+# inside PostgREST's payload limit.
+_INSERT_CHUNK = 2000
 
-    Returns {"source", "imported", "skipped", "header", "sheet_url"}.
-    Raises on a sheet that cannot be read or yields nothing usable — the
-    caller turns that into an error the user sees, and the previous prices are
-    left untouched rather than wiped by a bad sync.
+
+def import_entries(sb, source: str, entries: list[dict], label: str) -> dict:
     """
+    Replace everything held for `source` with `entries`, then record the
+    outcome on publisher_price_sheets.
+
+    The delete runs only once the new rows are parsed and in hand, so a file
+    that cannot be read leaves the previous prices in place rather than
+    emptying the catalog.
+    """
+    if not entries:
+        raise ValueError(
+            "no magazine/price pairs found — check that the file has a domain "
+            "column and a price column"
+        )
+
+    sb.from_("publisher_prices").delete().eq("source", source).execute()
+    for i in range(0, len(entries), _INSERT_CHUNK):
+        chunk = [{"source": source, **e} for e in entries[i:i + _INSERT_CHUNK]]
+        sb.from_("publisher_prices").insert(chunk).execute()
+        done = min(i + _INSERT_CHUNK, len(entries))
+        # Every tenth batch: a 230k-row catalog is 117 batches, and a line per
+        # batch buries everything else in the Railway log.
+        if done == len(entries) or (i // _INSERT_CHUNK) % 10 == 0:
+            print(f"[price_catalog] {source}: inserted {done}/{len(entries)}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    sb.from_("publisher_price_sheets").upsert({
+        "source":         source,
+        "source_label":   label,
+        "last_synced_at": now,
+        "row_count":      len(entries),
+        "last_error":     None,
+        "status":         "ok",
+        "updated_at":     now,
+    }).execute()
+
+    return {"source": source, "imported": len(entries), "label": label}
+
+
+def mark_syncing(sb, source: str, label: str) -> None:
+    """Flag a source as mid-import, so a long upload does not read as failure."""
+    sb.from_("publisher_price_sheets").upsert({
+        "source":       source,
+        "source_label": label,
+        "status":       "syncing",
+        "last_error":   None,
+        "updated_at":   datetime.now(timezone.utc).isoformat(),
+    }).execute()
+
+
+def mark_failed(sb, source: str, label: str, error: str) -> None:
+    """Record why an import failed. The previous prices are left in place."""
+    sb.from_("publisher_price_sheets").upsert({
+        "source":       source,
+        "source_label": label,
+        "status":       "error",
+        "last_error":   error[:500],
+        "updated_at":   datetime.now(timezone.utc).isoformat(),
+    }).execute()
+
+
+def sync_from_file(sb, source: str, content: bytes, filename: str) -> dict:
+    """Import an uploaded CSV/TSV of magazine + price for one source."""
+    if source not in SOURCES:
+        raise ValueError(f"unknown source {source!r}")
+
+    rows = read_delimited(content)
+    parsed = parse_rows(rows, source)
+    row_count = len(rows)
+    # A 230k-row catalog is held twice over at this point — once as raw cells,
+    # once as parsed entries. Release the raw copy before the inserts begin,
+    # which is where the container is tightest.
+    del rows
+    print(f"[price_catalog] {source}: {row_count} file row(s) from {filename!r} → "
+          f"{len(parsed['entries'])} price(s), {parsed['skipped']} skipped "
+          f"(columns {parsed['columns']} of header {parsed['header'][:8]})")
+    summary = import_entries(sb, source, parsed["entries"], filename)
+    summary["skipped"] = parsed["skipped"]
+    summary["header"] = parsed["header"]
+    return summary
+
+
+def sync_source(sb, source: str, sheet_url: str) -> dict:
+    """Import one source from a Google Sheet of magazine + price."""
     if source not in SOURCES:
         raise ValueError(f"unknown source {source!r}")
 
@@ -219,41 +365,17 @@ def sync_source(sb, source: str, sheet_url: str) -> dict:
     print(f"[price_catalog] {source}: reading spreadsheet {spreadsheet_id}")
     values = read_sheet_values(spreadsheet_id)
     parsed = parse_rows(values, source)
-    entries = parsed["entries"]
     print(f"[price_catalog] {source}: {len(values)} sheet row(s) → "
-          f"{len(entries)} price(s), {parsed['skipped']} skipped "
+          f"{len(parsed['entries'])} price(s), {parsed['skipped']} skipped "
           f"(columns {parsed['columns']} of header {parsed['header'][:8]})")
 
-    if not entries:
-        raise ValueError(
-            "no magazine/price pairs found in that sheet — check that it has a "
-            "domain column and a price column"
-        )
-
-    # Replace, so a magazine dropped from the sheet stops being priced. Done
-    # only once the new rows are in hand, so a failed read cannot empty the
-    # table.
-    sb.from_("publisher_prices").delete().eq("source", source).execute()
-    for i in range(0, len(entries), 500):
-        chunk = [{"source": source, **e} for e in entries[i:i + 500]]
-        sb.from_("publisher_prices").insert(chunk).execute()
-
-    sb.from_("publisher_price_sheets").upsert({
-        "source":         source,
-        "sheet_url":      sheet_url,
-        "last_synced_at": datetime.now(timezone.utc).isoformat(),
-        "row_count":      len(entries),
-        "last_error":     None,
-        "updated_at":     datetime.now(timezone.utc).isoformat(),
-    }).execute()
-
-    return {
-        "source":    source,
-        "imported":  len(entries),
-        "skipped":   parsed["skipped"],
-        "header":    parsed["header"],
-        "sheet_url": sheet_url,
-    }
+    summary = import_entries(sb, source, parsed["entries"], sheet_url)
+    sb.from_("publisher_price_sheets").update({"sheet_url": sheet_url}) \
+      .eq("source", source).execute()
+    summary["skipped"] = parsed["skipped"]
+    summary["header"] = parsed["header"]
+    summary["sheet_url"] = sheet_url
+    return summary
 
 
 def service_client():

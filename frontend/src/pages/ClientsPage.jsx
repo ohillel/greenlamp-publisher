@@ -27,14 +27,14 @@ const fmtEur = v => (
 )
 
 // Sources shown for a single-domain lookup, in the same order as the sheet.
-// Links.me and Collaborator quote in EUR; PressWhizz and PRNews in dollars.
-// This affects the Price Check modal alone — the article cards and task
-// tables keep their existing formatting.
+// Every source is quoted in USD — the three catalogs are supplied that way
+// and PressWhizz always was — and nothing is ever converted between
+// currencies, so these all render with a dollar sign.
 const PRICE_CHECK_SOURCES = [
   { key: 'price_presswhizz',   label: 'PressWhizz',       eur: false },
-  { key: 'price_linksme',      label: 'Links.me',         eur: true  },
+  { key: 'price_linksme',      label: 'Links.me',         eur: false },
   { key: 'price_prnews',       label: 'PRNews.io',        eur: false },
-  { key: 'price_collaborator', label: 'Collaborator.pro', eur: true  },
+  { key: 'price_collaborator', label: 'Collaborator.pro', eur: false },
 ]
 
 // The publishers whose prices come from a synced Google Sheet rather than a
@@ -46,15 +46,14 @@ const CATALOG_SOURCES = [
   { key: 'collaborator', label: 'Collaborator.pro' },
 ]
 
-// The three sources compared in the dashboard's Prices column. `pub` is the
-// publisher value that marks a source as the one Denise chose; PressWhizz
-// quotes in dollars while the other two quote in euros, and nothing is
-// converted, so no "cheapest" is marked — that would need an exchange rate.
+// The four sources compared in the dashboard's Prices column. `pub` is the
+// publisher value that marks a source as the one Denise chose. All four are
+// quoted in USD, so the figures are directly comparable.
 const PRICE_COMPARE_SOURCES = [
   { key: 'price_presswhizz',   short: 'PW', pub: 'presswhizz',   eur: false },
-  { key: 'price_linksme',      short: 'LM', pub: 'linksme',      eur: true  },
+  { key: 'price_linksme',      short: 'LM', pub: 'linksme',      eur: false },
   { key: 'price_prnews',       short: 'PR', pub: 'prnews',       eur: false },
-  { key: 'price_collaborator', short: 'CO', pub: 'collaborator', eur: true  },
+  { key: 'price_collaborator', short: 'CO', pub: 'collaborator', eur: false },
 ]
 
 const fmtDate = dateStr => {
@@ -352,6 +351,34 @@ export default function ClientsPage() {
       console.error('[price sheets] status failed:', e)
     }
   }, [])
+
+  const uploadSheetFile = async (source, file) => {
+    if (!file) return
+    setSyncingSrc(source)
+    setSheetNote(null)
+    try {
+      const form = new FormData()
+      form.append('source', source)
+      form.append('file', file)
+      const res = await fetch(`${API_BASE}/api/publisher-prices/upload`, {
+        method: 'POST',
+        body:   form,
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`)
+      setSheetNote({
+        ok: true,
+        text: `${CATALOG_SOURCES.find(s => s.key === source)?.label ?? source}: `
+            + `importing ${file.name} — this takes a few minutes for a large file. `
+            + `Reopen Price Check to see the count once it lands.`,
+      })
+      loadSheetStatus()
+    } catch (e) {
+      setSheetNote({ ok: false, text: String(e.message || e) })
+    } finally {
+      setSyncingSrc('')
+    }
+  }
 
   const syncSheet = async (source) => {
     const sheetUrl = (sheetUrls[source] ?? '').trim()
@@ -1332,7 +1359,7 @@ export default function ClientsPage() {
             <p style={{ margin: '0 0 12px', fontSize: 13, color: '#6b7280' }}>
               Paste one URL or domain per line. PressWhizz is checked live; Links.me,
               PRNews.io and Collaborator.pro are read from the synced price sheets below.
-              Several lines export to a new Google Sheet.
+              Several lines export to a new Google Sheet. All prices are in USD.
             </p>
             <textarea
               value={priceCheckInput}
@@ -1357,9 +1384,11 @@ export default function ClientsPage() {
             <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid #e5e7eb' }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>Price sheets</div>
               <p style={{ margin: '4px 0 10px', fontSize: 12, color: '#6b7280' }}>
-                One Google Sheet per publisher, with a magazine column and a price column.
-                Syncing replaces that publisher&apos;s prices. The sheet must be readable by
-                the Google account the app signs in with.
+                One list per publisher — a CSV or TSV with a magazine column and a price
+                column. Uploading replaces that publisher&apos;s prices, so a magazine no
+                longer on the list stops being priced. A Google Sheets link works too, but
+                the sheet must be readable by the Google account the app signs in with.
+                All prices are stored and shown in USD, exactly as supplied.
               </p>
 
               {CATALOG_SOURCES.map(src => {
@@ -1368,9 +1397,25 @@ export default function ClientsPage() {
                 const synced  = row.last_synced_at ? fmtDate(row.last_synced_at) : null
                 return (
                   <div key={src.key} style={{ marginBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 118, flex: 'none', fontSize: 12, color: '#374151' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ width: 118, flex: 'none', fontSize: 12, fontWeight: 600, color: '#374151' }}>
                         {src.label}
+                      </span>
+                      <input
+                        type="file"
+                        accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+                        disabled={busy || priceCheckRunning}
+                        onChange={e => {
+                          const f = e.target.files?.[0]
+                          e.target.value = ''        // so the same file can be re-picked
+                          uploadSheetFile(src.key, f)
+                        }}
+                        style={{ flex: 1, minWidth: 0, fontSize: 12 }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 118, flex: 'none', fontSize: 11, color: '#9ca3af' }}>
+                        or a Sheets link
                       </span>
                       <input
                         type="url"
@@ -1397,11 +1442,13 @@ export default function ClientsPage() {
                       </button>
                     </div>
                     <div style={{ marginLeft: 126, marginTop: 2, fontSize: 11, color: row.last_error ? '#dc2626' : '#9ca3af' }}>
-                      {row.last_error
-                        ? `Last sync failed: ${row.last_error}`
-                        : synced
-                          ? `${row.row_count ?? 0} price(s) · synced ${synced}`
-                          : 'Never synced'}
+                      {row.status === 'syncing'
+                        ? `Importing ${row.source_label ?? ''}… reopen to see the count`
+                        : row.last_error
+                          ? `Last import failed: ${row.last_error}`
+                          : synced
+                            ? `${(row.row_count ?? 0).toLocaleString()} price(s) · ${row.source_label ?? ''} · ${synced}`
+                            : 'Nothing imported yet'}
                     </div>
                   </div>
                 )

@@ -8,13 +8,14 @@ import os
 import sys
 from datetime import datetime
 
-# Column order in the sheet. Links.me and Collaborator quote in EUR; PressWhizz
-# and PRNews are in dollars. The EUR columns are written as numbers and given a
-# € number format so they still sort and sum.
+# Column order in the sheet. Every source is quoted in USD — the three
+# catalogs are supplied that way and PressWhizz always was — so no column
+# needs a currency format of its own.
 HEADERS = ["URL", "PressWhizz Price", "Links.me Price", "PRNews.io", "Collaborator.pro"]
 
-# 0-based indices of the EUR columns: Links.me (C), Collaborator.pro (E).
-_EUR_COLUMN_INDICES = (2, 4)
+# No EUR columns any more. Kept as an empty tuple so the formatting pass
+# below stays in place should a non-dollar source ever return.
+_EUR_COLUMN_INDICES = ()
 _EUR_NUMBER_FORMAT = '#,##0.00" €"'
 
 
