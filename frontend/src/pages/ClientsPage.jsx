@@ -326,6 +326,13 @@ export default function ClientsPage() {
   // Populated only for a single-domain lookup, which is shown on screen
   // instead of being exported to a sheet.
   const [priceCheckResult,  setPriceCheckResult]  = useState(null)
+  const [priceCheckProgress, setPriceCheckProgress] = useState({ completed: 0, total: 0 })
+  const priceCheckPollRef = useRef(null)
+  // The run continues on the server regardless; this only stops this tab
+  // asking about it.
+  useEffect(() => () => {
+    if (priceCheckPollRef.current) clearInterval(priceCheckPollRef.current)
+  }, [])
 
   // ── Price sheets: the synced catalog behind Links.me / PRNews / Collaborator
   const [sheetStatus,  setSheetStatus]  = useState([])     // rows from /status
@@ -421,6 +428,10 @@ export default function ClientsPage() {
     loadSheetStatus()
   }
 
+  // The run happens on the server and outlives the request that starts it:
+  // only PressWhizz still opens a browser, and it does so per domain, so a
+  // long list takes minutes — longer than a connection survives. We start it,
+  // then poll for progress and the finished sheet.
   const runPriceCheck = async () => {
     const urls = priceCheckInput.split('\n').map(s => s.trim()).filter(Boolean)
     if (urls.length === 0) return
@@ -428,6 +439,7 @@ export default function ClientsPage() {
     setPriceCheckError('')
     setPriceCheckSheetUrl('')
     setPriceCheckResult(null)
+    setPriceCheckProgress({ completed: 0, total: urls.length })
     try {
       const res = await fetch(`${API_BASE}/api/price-check/bulk`, {
         method:  'POST',
@@ -438,17 +450,51 @@ export default function ClientsPage() {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.detail || `Request failed (${res.status})`)
       }
-      const data = await res.json()
-      if (urls.length === 1) {
-        // One domain: render the four prices here; the backend makes no sheet.
-        setPriceCheckResult((data.results || [])[0] ?? null)
-      } else {
-        setPriceCheckSheetUrl(data.sheet_url || '')
-      }
+      const { run_id: runId } = await res.json()
+      if (!runId) throw new Error('The server did not start the price check.')
+      pollPriceCheck(runId, urls.length)
     } catch (err) {
       setPriceCheckError(err.message || 'Price check failed.')
+      setPriceCheckRunning(false)
     }
-    setPriceCheckRunning(false)
+  }
+
+  const pollPriceCheck = (runId, total) => {
+    // Cleared by stopPolling below, and on unmount by the effect that watches
+    // priceCheckPollRef, so a closed modal never leaves a timer running.
+    const tick = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/price-check/status/${runId}`)
+        if (!res.ok) throw new Error(`Status check failed (${res.status})`)
+        const run = await res.json()
+        setPriceCheckProgress({ completed: run.completed ?? 0, total: run.total ?? total })
+        if (run.status === 'running') return
+        stopPolling()
+        if (run.status === 'error') {
+          setPriceCheckError(run.error || 'Price check failed.')
+        } else if (total === 1) {
+          // One domain: render the four prices here; the server makes no sheet.
+          setPriceCheckResult((run.results || [])[0] ?? null)
+        } else {
+          setPriceCheckSheetUrl(run.sheet_url || '')
+        }
+        setPriceCheckRunning(false)
+      } catch (err) {
+        stopPolling()
+        setPriceCheckError(err.message || 'Lost track of the price check.')
+        setPriceCheckRunning(false)
+      }
+    }
+    stopPolling()
+    priceCheckPollRef.current = setInterval(tick, 3000)
+    tick()
+  }
+
+  const stopPolling = () => {
+    if (priceCheckPollRef.current) {
+      clearInterval(priceCheckPollRef.current)
+      priceCheckPollRef.current = null
+    }
   }
 
   // Fetch distinct published months for the dropdown
@@ -1347,7 +1393,7 @@ export default function ClientsPage() {
             background: 'rgba(0,0,0,0.45)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
-          onClick={() => { if (!priceCheckRunning) setPriceCheckOpen(false) }}
+          onClick={() => setPriceCheckOpen(false)}
         >
           <div
             style={{
@@ -1467,7 +1513,8 @@ export default function ClientsPage() {
             {priceCheckRunning && (
               <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#374151' }}>
                 <span className="price-spinner" />
-                Checking {priceCheckInput.split('\n').map(s => s.trim()).filter(Boolean).length} site(s)…
+                Checking {priceCheckProgress.completed} of {priceCheckProgress.total} site(s)…
+                {priceCheckProgress.total > 1 && ' This keeps running if you close the window.'}
               </div>
             )}
 
@@ -1510,7 +1557,6 @@ export default function ClientsPage() {
               <button
                 className="btn-ghost"
                 onClick={() => setPriceCheckOpen(false)}
-                disabled={priceCheckRunning}
               >
                 Close
               </button>

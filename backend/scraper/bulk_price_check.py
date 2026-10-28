@@ -19,7 +19,7 @@ from .price_catalog import normalize_domain
 DEFAULT_LINKSME_CLIENT = "apiiro"
 
 
-def check_prices_bulk(urls: list[str]) -> list[dict]:
+def check_prices_bulk(urls: list[str], on_progress=None) -> list[dict]:
     """
     Returns a list of
         {"original_url": <as typed>, "domain": <normalized>,
@@ -29,8 +29,13 @@ def check_prices_bulk(urls: list[str]) -> list[dict]:
          "price_collaborator": <float|None>}   # EUR, catalog
     in the same order as the input. A domain that errors yields None for that
     price rather than failing the whole batch.
+
+    on_progress(done, total) is called after each domain, so a caller running
+    this in the background can report how far along it is. A progress callback
+    that raises is ignored — reporting must never sink the run itself.
     """
     results = []
+    total = len(urls)
 
     for u in urls:
         domain = normalize_domain(u)
@@ -53,5 +58,10 @@ def check_prices_bulk(urls: list[str]) -> list[dict]:
             print(f"  [bulk_price_check] error for {domain!r}: {e}")
 
         results.append(result)
+        if on_progress is not None:
+            try:
+                on_progress(len(results), total)
+            except Exception as e:
+                print(f"  [bulk_price_check] progress callback failed: {e}")
 
     return results

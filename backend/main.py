@@ -89,6 +89,36 @@ def _recover_orphaned_price_fetches() -> None:
         print(f"[startup] could not recover interrupted price fetches: {e}")
 
 
+def _close_interrupted_price_checks() -> None:
+    """
+    Fail any Price Check run a restart left mid-flight.
+
+    The run lives in a background task inside the web process, so a deploy
+    ends it with its row still reading 'running' and the modal polling for a
+    result that will never arrive. Nothing resumes it — the run is cheap to
+    start again, and saying so beats a progress bar that never moves.
+    """
+    try:
+        sb = _sb()
+        stale = (sb.from_("price_check_runs")
+                   .select("id, completed, total")
+                   .eq("status", "running")
+                   .execute().data) or []
+        if not stale:
+            return
+        for row in stale:
+            sb.from_("price_check_runs").update({
+                "status": "error",
+                "error": (f"Interrupted by a server restart after "
+                          f"{row.get('completed', 0)} of {row.get('total', 0)} "
+                          f"site(s). Please run it again."),
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", row["id"]).execute()
+        print(f"[startup] closed {len(stale)} price check run(s) a restart interrupted")
+    except Exception as e:
+        print(f"[startup] could not close interrupted price checks: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
@@ -129,6 +159,7 @@ async def lifespan(app: FastAPI):
     print(f"[startup] RETAINER_EMAIL  = {_retainer}    ({_retainer_src})")
     print(f"[startup] email sender    = {sender_email()}")
     _recover_orphaned_price_fetches()
+    _close_interrupted_price_checks()
     yield
     scheduler.shutdown(wait=False)
     print("[scheduler] stopped")
@@ -207,40 +238,87 @@ class BulkPriceCheckRequest(BaseModel):
 
 
 @app.post("/api/price-check/bulk")
-async def price_check_bulk(req: BulkPriceCheckRequest):
+async def price_check_bulk(req: BulkPriceCheckRequest, background_tasks: BackgroundTasks):
     """
-    Or-only ad-hoc price checker: fetches PressWhizz + Links.me prices for a
-    pasted list of URLs/domains (Links.me looked up under the "mstone"
-    catalog) and exports the results to a new Google Sheet.
-    Role enforcement is on the frontend, same as the other Or-only endpoints
-    — the service-role key used here must never be exposed to non-Or users.
+    Or-only ad-hoc price checker: PressWhizz live plus the catalog prices, for
+    a pasted list of URLs/domains, exported to a new Google Sheet.
+
+    Starts the run and returns its id at once rather than holding the request
+    open. Only PressWhizz still opens a browser, but it does so per domain, so
+    a long list takes minutes — far longer than a connection survives, and a
+    38-domain list on 28 Oct showed the browser an error while the server was
+    still working through it. Progress and the finished sheet are read back
+    from /api/price-check/status/{run_id}.
+
+    Role enforcement is on the frontend, same as the other Or-only endpoints —
+    the service-role key used here must never be exposed to non-Or users.
     Does not touch the per-article scraping flow (prices.py) or its sessions.
     """
     urls = [u.strip() for u in req.urls if u.strip()]
     if not urls:
         raise HTTPException(status_code=422, detail="urls must contain at least one entry")
-    print(f"[price-check/bulk] checking {len(urls)} url(s)")
+
+    sb = _sb()
+    run = sb.from_("price_check_runs").insert({
+        "urls": urls, "total": len(urls), "completed": 0, "status": "running",
+    }).execute()
+    run_id = (run.data or [{}])[0].get("id")
+    if not run_id:
+        raise HTTPException(status_code=500, detail="could not start the price check")
+
+    print(f"[price-check/bulk] run {run_id} started — {len(urls)} url(s)")
+    background_tasks.add_task(_run_price_check, run_id, urls)
+    return {"run_id": run_id, "status": "running", "total": len(urls)}
+
+
+async def _run_price_check(run_id: str, urls: list[str]) -> None:
+    """Work through one Price Check run, recording progress as it goes."""
+    sb = _sb()
+
+    def record_progress(done: int, total: int) -> None:
+        sb.from_("price_check_runs").update({"completed": done}).eq("id", run_id).execute()
+
     try:
-        # Shares _PRICE_FETCH_SEMAPHORE with _bg_fetch_prices so the two
-        # never run more than 2 concurrent Playwright sessions combined —
-        # otherwise simultaneous bg_fetch_prices + bulk price checks exhaust
-        # Railway's memory and crash Chromium.
+        # Shares _PRICE_FETCH_SEMAPHORE with _bg_fetch_prices so the two never
+        # run more than one Playwright session between them — otherwise a bulk
+        # check running beside article fetches exhausts Railway's memory and
+        # crashes Chromium.
         async with _PRICE_FETCH_SEMAPHORE:
-            results = await run_in_threadpool(check_prices_bulk, urls)
+            results = await run_in_threadpool(check_prices_bulk, urls, record_progress)
 
         # A single domain is read straight off the screen, so there is no
         # sheet to create. Anything more still exports as before.
-        if len(urls) == 1:
-            print("[price-check/bulk] single domain — returning results without a sheet")
-            return {"results": results, "sheet_url": None}
+        sheet_url = None
+        if len(urls) > 1:
+            print(f"[price-check/bulk] run {run_id}: prices fetched, creating sheet…")
+            sheet_url = await run_in_threadpool(create_price_check_sheet, results)
+            print(f"[price-check/bulk] run {run_id}: sheet created: {sheet_url}")
 
-        print(f"[price-check/bulk] fetched prices, creating sheet…")
-        sheet_url = await run_in_threadpool(create_price_check_sheet, results)
-        print(f"[price-check/bulk] sheet created: {sheet_url}")
-        return {"results": results, "sheet_url": sheet_url}
+        sb.from_("price_check_runs").update({
+            "status": "done", "results": results, "sheet_url": sheet_url,
+            "completed": len(results), "finished_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", run_id).execute()
+        print(f"[price-check/bulk] run {run_id} finished")
     except Exception as e:
-        print(f"[price-check/bulk] ERROR: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[price-check/bulk] run {run_id} FAILED: {e}")
+        try:
+            sb.from_("price_check_runs").update({
+                "status": "error", "error": str(e)[:500],
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", run_id).execute()
+        except Exception as e2:
+            print(f"[price-check/bulk] run {run_id}: could not record the error: {e2}")
+
+
+@app.get("/api/price-check/status/{run_id}")
+async def price_check_status(run_id: str):
+    """How far one Price Check run has got, and its results once it is done."""
+    rows = (_sb().from_("price_check_runs")
+                 .select("id, total, completed, status, results, sheet_url, error")
+                 .eq("id", run_id).execute().data) or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="price check run not found")
+    return rows[0]
 
 
 def _run_with_captured_logs(fn, *args, **kwargs) -> dict:
