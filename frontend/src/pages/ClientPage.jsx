@@ -8,6 +8,13 @@ import { supabase } from '../lib/supabase'
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const fmtPrice = v => (v != null ? `$${Number(v).toLocaleString()}` : null)
+// Collaborator.pro is the one source quoted in euros — the catalogs supply it
+// that way and nothing here converts between currencies.
+const fmtEur = v => (
+  v != null
+    ? `${Number(v).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+    : null
+)
 const fmtDate  = ts => ts ? new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : null
 
 const API_BASE = 'https://greenlamp-publisher-production-75fd.up.railway.app'
@@ -52,6 +59,7 @@ const EMPTY_FORM = { google_doc_url: '', magazine: '', preferred_publisher: '', 
 const EMPTY_EDIT = {
   google_doc_url: '', magazine: '', preferred_publisher: '',
   chosen_publisher: '', price_presswhizz: '', price_linksme: '',
+  price_prnews: '', price_collaborator: '',
   publisher_notes: '',
 }
 const EMPTY_DENISE_EDIT = { google_doc_url: '', magazine: '', preferred_publisher: '', custom_publisher_note: '' }
@@ -514,6 +522,8 @@ export default function ClientPage() {
       chosen_publisher:    article.chosen_publisher    ?? '',
       price_presswhizz:    article.price_presswhizz    ?? '',
       price_linksme:       article.price_linksme       ?? '',
+      price_prnews:        article.price_prnews        ?? '',
+      price_collaborator:  article.price_collaborator  ?? '',
       publisher_notes:     article.publisher_notes     ?? '',
     })
   }
@@ -531,6 +541,8 @@ export default function ClientPage() {
       chosen_publisher:    editData.chosen_publisher    || null,
       price_presswhizz:    editData.price_presswhizz !== '' ? parseFloat(editData.price_presswhizz) : null,
       price_linksme:       editData.price_linksme     !== '' ? parseFloat(editData.price_linksme)    : null,
+      price_prnews:        editData.price_prnews      !== '' ? parseFloat(editData.price_prnews)      : null,
+      price_collaborator:  editData.price_collaborator!== '' ? parseFloat(editData.price_collaborator): null,
       publisher_notes:     editData.publisher_notes    || null,
     }).eq('id', id)
 
@@ -538,8 +550,10 @@ export default function ClientPage() {
     else {
       setArticles(prev => prev.map(a => a.id === id
         ? { ...a, ...editData,
-            price_presswhizz: editData.price_presswhizz !== '' ? parseFloat(editData.price_presswhizz) : null,
-            price_linksme:    editData.price_linksme    !== '' ? parseFloat(editData.price_linksme)    : null }
+            price_presswhizz:   editData.price_presswhizz  !== '' ? parseFloat(editData.price_presswhizz)  : null,
+            price_linksme:      editData.price_linksme     !== '' ? parseFloat(editData.price_linksme)     : null,
+            price_prnews:       editData.price_prnews      !== '' ? parseFloat(editData.price_prnews)      : null,
+            price_collaborator: editData.price_collaborator!== '' ? parseFloat(editData.price_collaborator): null }
         : a))
       setEditingId(null)
     }
@@ -1005,7 +1019,12 @@ export default function ClientPage() {
                     }
                   </div>
                 </div>
-                {!isOther && (
+                {/* Shown whatever the publisher. The block used to be hidden for
+                    "other", PRNews and Collaborator, from when only PressWhizz
+                    and Links.me had prices and the rest were noise — which
+                    would now hide the PRNews and Collaborator figures on
+                    precisely the articles routed to them. */}
+                {(
                   <div className="card-field-row prices">
                     {pricesLoading && !isEditing ? (
                       <div className="price-fetching" style={{ gridColumn: '1 / -1' }}>
@@ -1026,9 +1045,27 @@ export default function ClientPage() {
                         <div className="card-field">
                           <span className="cf-label">Links.me price</span>
                           {isEditing
-                            ? <input name="price_linksme" type="number" value={editData.price_linksme} onChange={handleEditChange} className="edit-input" placeholder="₪" />
+                            ? <input name="price_linksme" type="number" value={editData.price_linksme} onChange={handleEditChange} className="edit-input" placeholder="$" />
                             : <span className="price-val" title={article.price_fetch_error || ''}>
                                 {fmtPrice(article.price_linksme) ?? (article.prices_checked_at ? 'Price unavailable' : '—')}
+                              </span>
+                          }
+                        </div>
+                        <div className="card-field">
+                          <span className="cf-label">PRNews.io price</span>
+                          {isEditing
+                            ? <input name="price_prnews" type="number" value={editData.price_prnews} onChange={handleEditChange} className="edit-input" placeholder="$" />
+                            : <span className="price-val" title={article.price_fetch_error || ''}>
+                                {fmtPrice(article.price_prnews) ?? (article.prices_checked_at ? 'Price unavailable' : '—')}
+                              </span>
+                          }
+                        </div>
+                        <div className="card-field">
+                          <span className="cf-label">Collaborator.pro price</span>
+                          {isEditing
+                            ? <input name="price_collaborator" type="number" value={editData.price_collaborator} onChange={handleEditChange} className="edit-input" placeholder="€" />
+                            : <span className="price-val" title={article.price_fetch_error || ''}>
+                                {fmtEur(article.price_collaborator) ?? (article.prices_checked_at ? 'Price unavailable' : '—')}
                               </span>
                           }
                         </div>
@@ -1309,11 +1346,14 @@ export default function ClientPage() {
         }
 
         const renderPublisherCard = article => {
-          const chosenPrice = article.chosen_publisher === 'presswhizz'
-            ? article.price_presswhizz
-            : article.chosen_publisher === 'linksme'
-              ? article.price_linksme
-              : null
+          const CHOSEN_PRICE_FIELD = {
+            presswhizz:   ['price_presswhizz',   fmtPrice],
+            linksme:      ['price_linksme',      fmtPrice],
+            prnews:       ['price_prnews',       fmtPrice],
+            collaborator: ['price_collaborator', fmtEur],
+          }
+          const [chosenField, chosenFmt] = CHOSEN_PRICE_FIELD[article.chosen_publisher] ?? []
+          const chosenPrice = chosenField ? article[chosenField] : null
           return (
             <div key={article.id} id={`article-card-${article.id}`} className="article-card">
               <div className="card-header">
@@ -1340,19 +1380,28 @@ export default function ClientPage() {
                   {chosenPrice != null && (
                     <div className="card-field">
                       <span className="cf-label">Price</span>
-                      <span className="price-val highlight">{fmtPrice(chosenPrice)}</span>
+                      <span className="price-val highlight">{chosenFmt(chosenPrice)}</span>
                     </div>
                   )}
                 </div>
-                {(article.price_presswhizz != null || article.price_linksme != null) && (
+                {(article.price_presswhizz != null || article.price_linksme != null
+                  || article.price_prnews != null || article.price_collaborator != null) && (
                   <div className="card-field-row prices">
                     <div className="card-field">
                       <span className="cf-label">PressWhizz</span>
-                      <span className="price-val">{fmtPrice(article.price_presswhizz)}</span>
+                      <span className="price-val">{fmtPrice(article.price_presswhizz) ?? '—'}</span>
                     </div>
                     <div className="card-field">
                       <span className="cf-label">Links.me</span>
-                      <span className="price-val">{fmtPrice(article.price_linksme)}</span>
+                      <span className="price-val">{fmtPrice(article.price_linksme) ?? '—'}</span>
+                    </div>
+                    <div className="card-field">
+                      <span className="cf-label">PRNews.io</span>
+                      <span className="price-val">{fmtPrice(article.price_prnews) ?? '—'}</span>
+                    </div>
+                    <div className="card-field">
+                      <span className="cf-label">Collaborator.pro</span>
+                      <span className="price-val">{fmtEur(article.price_collaborator) ?? '—'}</span>
                     </div>
                   </div>
                 )}
