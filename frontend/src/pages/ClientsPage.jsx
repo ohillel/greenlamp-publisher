@@ -27,14 +27,14 @@ const fmtEur = v => (
 )
 
 // Sources shown for a single-domain lookup, in the same order as the sheet.
-// Every source is quoted in USD — the three catalogs are supplied that way
-// and PressWhizz always was — and nothing is ever converted between
-// currencies, so these all render with a dollar sign.
+// PressWhizz, Links.me and PRNews are quoted in dollars and Collaborator in
+// euros, exactly as each catalog supplies them. Nothing is ever converted
+// between currencies — only labelled with the right sign.
 const PRICE_CHECK_SOURCES = [
   { key: 'price_presswhizz',   label: 'PressWhizz',       eur: false },
   { key: 'price_linksme',      label: 'Links.me',         eur: false },
   { key: 'price_prnews',       label: 'PRNews.io',        eur: false },
-  { key: 'price_collaborator', label: 'Collaborator.pro', eur: false },
+  { key: 'price_collaborator', label: 'Collaborator.pro', eur: true  },
 ]
 
 // The publishers whose prices come from a synced Google Sheet rather than a
@@ -47,13 +47,14 @@ const CATALOG_SOURCES = [
 ]
 
 // The four sources compared in the dashboard's Prices column. `pub` is the
-// publisher value that marks a source as the one Denise chose. All four are
-// quoted in USD, so the figures are directly comparable.
+// publisher value that marks a source as the one Denise chose. Three are in
+// dollars and Collaborator is in euros, so no "cheapest" is marked — that
+// would need an exchange rate, and nothing here converts.
 const PRICE_COMPARE_SOURCES = [
   { key: 'price_presswhizz',   short: 'PW', pub: 'presswhizz',   eur: false },
   { key: 'price_linksme',      short: 'LM', pub: 'linksme',      eur: false },
   { key: 'price_prnews',       short: 'PR', pub: 'prnews',       eur: false },
-  { key: 'price_collaborator', short: 'CO', pub: 'collaborator', eur: false },
+  { key: 'price_collaborator', short: 'CO', pub: 'collaborator', eur: true  },
 ]
 
 const fmtDate = dateStr => {
@@ -1359,7 +1360,8 @@ export default function ClientsPage() {
             <p style={{ margin: '0 0 12px', fontSize: 13, color: '#6b7280' }}>
               Paste one URL or domain per line. PressWhizz is checked live; Links.me,
               PRNews.io and Collaborator.pro are read from the synced price sheets below.
-              Several lines export to a new Google Sheet. All prices are in USD.
+              Several lines export to a new Google Sheet. Prices are in USD, except
+              Collaborator.pro which is in EUR.
             </p>
             <textarea
               value={priceCheckInput}
@@ -1388,7 +1390,8 @@ export default function ClientsPage() {
                 column. Uploading replaces that publisher&apos;s prices, so a magazine no
                 longer on the list stops being priced. A Google Sheets link works too, but
                 the sheet must be readable by the Google account the app signs in with.
-                All prices are stored and shown in USD, exactly as supplied.
+                Prices are stored and shown exactly as supplied — USD for Links.me and
+                PRNews.io, EUR for Collaborator.pro — never converted.
               </p>
 
               {CATALOG_SOURCES.map(src => {

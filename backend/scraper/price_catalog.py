@@ -25,13 +25,13 @@ from .eur_price import normalize_amount
 SOURCES = ("linksme", "prnews", "collaborator")
 
 # What a source's prices are in when the cells carry no currency marker of
-# their own. All three catalogs are supplied in USD and nothing converts
-# between currencies anywhere in this codebase — the figures are stored and
-# shown exactly as given.
+# their own. Links.me and PRNews are supplied in dollars, Collaborator in
+# euros. Nothing converts between currencies anywhere in this codebase — the
+# figures are stored and shown exactly as given, only labelled correctly.
 DEFAULT_CURRENCY = {
     "linksme":      "USD",
     "prnews":       "USD",
-    "collaborator": "USD",
+    "collaborator": "EUR",
 }
 
 # Sanity window. Far wider than the scrapers': they read prices out of page
