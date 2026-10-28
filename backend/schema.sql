@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS articles (
     chosen_publisher    TEXT,
     price_presswhizz    NUMERIC(10, 2),   -- USD
     price_linksme       NUMERIC(10, 2),   -- EUR
+    price_prnews        NUMERIC(10, 2),   -- USD
     price_collaborator  NUMERIC(10, 2),   -- EUR
     status              TEXT NOT NULL DEFAULT 'submitted'
                             CHECK (status IN ('draft', 'submitted', 'approved', 'sent_to_publisher', 'published', 'not_published')),

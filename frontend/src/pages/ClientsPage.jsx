@@ -27,13 +27,23 @@ const fmtEur = v => (
 )
 
 // Sources shown for a single-domain lookup, in the same order as the sheet.
-// Links.me and Collaborator quote in EUR, so only PressWhizz is in dollars.
+// Links.me and Collaborator quote in EUR; PressWhizz and PRNews in dollars.
 // This affects the Price Check modal alone — the article cards and task
 // tables keep their existing formatting.
 const PRICE_CHECK_SOURCES = [
   { key: 'price_presswhizz',   label: 'PressWhizz',       eur: false },
   { key: 'price_linksme',      label: 'Links.me',         eur: true  },
+  { key: 'price_prnews',       label: 'PRNews.io',        eur: false },
   { key: 'price_collaborator', label: 'Collaborator.pro', eur: true  },
+]
+
+// The publishers whose prices come from a synced Google Sheet rather than a
+// live lookup. PressWhizz is absent on purpose: it has no sheet, so it is
+// still scraped on every check.
+const CATALOG_SOURCES = [
+  { key: 'linksme',      label: 'Links.me'         },
+  { key: 'prnews',       label: 'PRNews.io'        },
+  { key: 'collaborator', label: 'Collaborator.pro' },
 ]
 
 // The three sources compared in the dashboard's Prices column. `pub` is the
@@ -43,6 +53,7 @@ const PRICE_CHECK_SOURCES = [
 const PRICE_COMPARE_SOURCES = [
   { key: 'price_presswhizz',   short: 'PW', pub: 'presswhizz',   eur: false },
   { key: 'price_linksme',      short: 'LM', pub: 'linksme',      eur: true  },
+  { key: 'price_prnews',       short: 'PR', pub: 'prnews',       eur: false },
   { key: 'price_collaborator', short: 'CO', pub: 'collaborator', eur: true  },
 ]
 
@@ -316,6 +327,59 @@ export default function ClientsPage() {
   // instead of being exported to a sheet.
   const [priceCheckResult,  setPriceCheckResult]  = useState(null)
 
+  // ── Price sheets: the synced catalog behind Links.me / PRNews / Collaborator
+  const [sheetStatus,  setSheetStatus]  = useState([])     // rows from /status
+  const [sheetUrls,    setSheetUrls]    = useState({})     // source -> input value
+  const [syncingSrc,   setSyncingSrc]   = useState('')     // source mid-sync
+  const [sheetNote,    setSheetNote]    = useState(null)   // {ok, text}
+
+  const loadSheetStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/publisher-prices/status`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setSheetStatus(data.sources ?? [])
+      // Seed each input with the sheet already on file, without clobbering a
+      // URL being typed.
+      setSheetUrls(prev => {
+        const next = { ...prev }
+        for (const row of data.sources ?? []) {
+          if (next[row.source] === undefined) next[row.source] = row.sheet_url ?? ''
+        }
+        return next
+      })
+    } catch (e) {
+      console.error('[price sheets] status failed:', e)
+    }
+  }, [])
+
+  const syncSheet = async (source) => {
+    const sheetUrl = (sheetUrls[source] ?? '').trim()
+    if (!sheetUrl) return
+    setSyncingSrc(source)
+    setSheetNote(null)
+    try {
+      const res = await fetch(`${API_BASE}/api/publisher-prices/sync`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ source, sheet_url: sheetUrl }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`)
+      setSheetNote({
+        ok: true,
+        text: `${CATALOG_SOURCES.find(s => s.key === source)?.label ?? source}: `
+            + `imported ${data.imported} price${data.imported === 1 ? '' : 's'}`
+            + (data.skipped ? `, skipped ${data.skipped} unusable row(s)` : ''),
+      })
+      loadSheetStatus()
+    } catch (e) {
+      setSheetNote({ ok: false, text: String(e.message || e) })
+    } finally {
+      setSyncingSrc('')
+    }
+  }
+
   const openPriceCheck = () => {
     setPriceCheckInput('')
     setPriceCheckError('')
@@ -323,6 +387,10 @@ export default function ClientsPage() {
     setPriceCheckResult(null)
     setPriceCheckRunning(false)
     setPriceCheckOpen(true)
+    // Loaded here rather than from an effect on priceCheckOpen: opening the
+    // modal is the only thing that needs it, and an effect would just be a
+    // second place to keep in step.
+    loadSheetStatus()
   }
 
   const runPriceCheck = async () => {
@@ -470,7 +538,7 @@ export default function ClientsPage() {
 
   const refreshOrArticles = useCallback(async () => {
     if (role !== 'or') return
-    const cols = 'id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, assigned_to, price_presswhizz, price_linksme, price_collaborator, prices_checked_at, price_fetch_error, clients(name)'
+    const cols = 'id, client_id, status, created_at, magazine, google_doc_url, chosen_publisher, preferred_publisher, assigned_to, price_presswhizz, price_linksme, price_prnews, price_collaborator, prices_checked_at, price_fetch_error, clients(name)'
     const [submittedRes, approvedOrRes] = await Promise.all([
       supabase.from('articles').select(cols).eq('status', 'submitted').order('created_at', { ascending: true }),
       supabase.from('articles').select(cols).eq('status', 'approved').eq('assigned_to', 'or').order('created_at', { ascending: true }),
@@ -1262,8 +1330,9 @@ export default function ClientsPage() {
           >
             <h3 style={{ margin: '0 0 4px', fontSize: 16, color: '#111827' }}>Price Check</h3>
             <p style={{ margin: '0 0 12px', fontSize: 13, color: '#6b7280' }}>
-              Paste one URL or domain per line. Prices are checked on PressWhizz and Links.me
-              (catalog: mstone) and exported to a new Google Sheet.
+              Paste one URL or domain per line. PressWhizz is checked live; Links.me,
+              PRNews.io and Collaborator.pro are read from the synced price sheets below.
+              Several lines export to a new Google Sheet.
             </p>
             <textarea
               value={priceCheckInput}
@@ -1280,6 +1349,70 @@ export default function ClientsPage() {
             {priceCheckError && (
               <div style={{ marginTop: 10, fontSize: 13, color: '#dc2626' }}>{priceCheckError}</div>
             )}
+
+            {/* Price sheets — the catalog that replaced the Links.me, PRNews
+                and Collaborator scrapes. Syncing replaces that source's
+                prices, so a magazine dropped from the sheet stops being
+                priced instead of lingering at a stale number. */}
+            <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid #e5e7eb' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>Price sheets</div>
+              <p style={{ margin: '4px 0 10px', fontSize: 12, color: '#6b7280' }}>
+                One Google Sheet per publisher, with a magazine column and a price column.
+                Syncing replaces that publisher&apos;s prices. The sheet must be readable by
+                the Google account the app signs in with.
+              </p>
+
+              {CATALOG_SOURCES.map(src => {
+                const row     = sheetStatus.find(r => r.source === src.key) || {}
+                const busy    = syncingSrc === src.key
+                const synced  = row.last_synced_at ? fmtDate(row.last_synced_at) : null
+                return (
+                  <div key={src.key} style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 118, flex: 'none', fontSize: 12, color: '#374151' }}>
+                        {src.label}
+                      </span>
+                      <input
+                        type="url"
+                        value={sheetUrls[src.key] ?? ''}
+                        onChange={e => setSheetUrls(prev => ({ ...prev, [src.key]: e.target.value }))}
+                        disabled={busy || priceCheckRunning}
+                        placeholder="https://docs.google.com/spreadsheets/d/…"
+                        style={{
+                          flex: 1, minWidth: 0, padding: '6px 8px', borderRadius: 6,
+                          border: '1px solid #d1d5db', fontSize: 12, color: '#111827',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => syncSheet(src.key)}
+                        disabled={busy || priceCheckRunning || !(sheetUrls[src.key] ?? '').trim()}
+                        style={{
+                          flex: 'none', padding: '6px 12px', borderRadius: 6,
+                          border: '1px solid #d1d5db', background: '#f9fafb',
+                          fontSize: 12, cursor: busy ? 'default' : 'pointer',
+                        }}
+                      >
+                        {busy ? 'Syncing…' : 'Sync'}
+                      </button>
+                    </div>
+                    <div style={{ marginLeft: 126, marginTop: 2, fontSize: 11, color: row.last_error ? '#dc2626' : '#9ca3af' }}>
+                      {row.last_error
+                        ? `Last sync failed: ${row.last_error}`
+                        : synced
+                          ? `${row.row_count ?? 0} price(s) · synced ${synced}`
+                          : 'Never synced'}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {sheetNote && (
+                <div style={{ marginTop: 8, fontSize: 12, color: sheetNote.ok ? '#16a34a' : '#dc2626' }}>
+                  {sheetNote.text}
+                </div>
+              )}
+            </div>
 
             {priceCheckRunning && (
               <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#374151' }}>

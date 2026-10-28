@@ -28,7 +28,7 @@ from scraper.email_notifications import (  # noqa: E402
 )
 from scraper.bulk_price_check import check_prices_bulk                                            # noqa: E402
 from scraper.sheets_export import create_price_check_sheet                                        # noqa: E402
-from scraper import presswhizz, linksme, collaborator                                              # noqa: E402
+from scraper import presswhizz, linksme, collaborator, price_catalog                                              # noqa: E402
 
 
 def _sb():
@@ -322,12 +322,13 @@ async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> 
         sb.from_("articles").update({
             "price_presswhizz":   result.get("presswhizz"),
             "price_linksme":      result.get("linksme"),
+            "price_prnews":       result.get("prnews"),
             "price_collaborator": result.get("collaborator"),
             "prices_checked_at": datetime.now(timezone.utc).isoformat(),
             "price_fetch_error": "; ".join(f"{k}: {v}" for k, v in errors.items()) if errors else None,
         }).eq("id", article_id).execute()
         print(f"[bg_prices] saved — pw={result.get('presswhizz')} lm={result.get('linksme')} "
-              f"co={result.get('collaborator')} errors={errors}")
+              f"pr={result.get('prnews')} co={result.get('collaborator')} errors={errors}")
     except Exception as e:
         print(f"[bg_prices] ERROR for article {article_id}: {e}")
         try:
@@ -337,6 +338,69 @@ async def _bg_fetch_prices(article_id: str, magazine: str, client_name: str) -> 
             }).eq("id", article_id).execute()
         except Exception as e2:
             print(f"[bg_prices] failed to record error for article {article_id}: {e2}")
+
+
+class SyncPriceSheetRequest(BaseModel):
+    source:    str   # 'linksme' | 'prnews' | 'collaborator'
+    sheet_url: str
+
+
+@app.post("/api/publisher-prices/sync")
+async def sync_publisher_prices(req: SyncPriceSheetRequest):
+    """
+    Pull one publisher's magazine/price sheet into the catalog, replacing what
+    was held for that source. Or-only, enforced on the frontend like the other
+    Or-only endpoints.
+
+    A failed read leaves the existing prices untouched and records the reason,
+    so a broken or unshared sheet degrades to "still using the previous sync"
+    rather than wiping the catalog.
+    """
+    sb = _sb()
+    source = (req.source or "").strip().lower()
+    if source not in price_catalog.SOURCES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"source must be one of {', '.join(price_catalog.SOURCES)}",
+        )
+    try:
+        summary = await run_in_threadpool(
+            price_catalog.sync_source, sb, source, req.sheet_url
+        )
+        print(f"[publisher-prices/sync] {summary}")
+        return summary
+    except Exception as e:
+        print(f"[publisher-prices/sync] {source} FAILED: {e}")
+        try:
+            sb.from_("publisher_price_sheets").upsert({
+                "source":     source,
+                "sheet_url":  req.sheet_url,
+                "last_error": str(e),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }).execute()
+        except Exception as e2:
+            print(f"[publisher-prices/sync] could not record the error: {e2}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/publisher-prices/status")
+async def publisher_prices_status():
+    """Each source's sheet, when it last synced, and how many prices it holds."""
+    sb = _sb()
+    rows = (sb.from_("publisher_price_sheets").select("*").execute().data) or []
+    by_source = {r["source"]: r for r in rows}
+    return {
+        "sources": [
+            {
+                "source":         s,
+                "sheet_url":      (by_source.get(s) or {}).get("sheet_url"),
+                "last_synced_at": (by_source.get(s) or {}).get("last_synced_at"),
+                "row_count":      (by_source.get(s) or {}).get("row_count"),
+                "last_error":     (by_source.get(s) or {}).get("last_error"),
+            }
+            for s in price_catalog.SOURCES
+        ]
+    }
 
 
 class RefetchPricesRequest(BaseModel):
@@ -373,6 +437,7 @@ async def refetch_prices(req: RefetchPricesRequest, background_tasks: Background
     sb.from_("articles").update({
         "price_presswhizz":   None,
         "price_linksme":      None,
+        "price_prnews":       None,
         "price_collaborator": None,
         "prices_checked_at":  None,
         "price_fetch_error":  None,

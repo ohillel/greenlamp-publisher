@@ -412,7 +412,7 @@ export default function ClientPage() {
       preferred_publisher:   editingDeniseData.preferred_publisher   || null,
       custom_publisher_note: editingDeniseData.custom_publisher_note || null,
       // Clear stale prices when magazine changes so the new fetch is authoritative
-      ...(magazineChanged ? { price_presswhizz: null, price_linksme: null, price_collaborator: null, prices_checked_at: null, price_fetch_error: null } : {}),
+      ...(magazineChanged ? { price_presswhizz: null, price_linksme: null, price_prnews: null, price_collaborator: null, prices_checked_at: null, price_fetch_error: null } : {}),
     }).eq('id', id)
 
     if (!error) {
@@ -421,7 +421,7 @@ export default function ClientPage() {
           ? {
               ...a,
               ...editingDeniseData,
-              ...(magazineChanged ? { price_presswhizz: null, price_linksme: null, price_collaborator: null, prices_checked_at: null, price_fetch_error: null } : {}),
+              ...(magazineChanged ? { price_presswhizz: null, price_linksme: null, price_prnews: null, price_collaborator: null, prices_checked_at: null, price_fetch_error: null } : {}),
             }
           : a
       ))
