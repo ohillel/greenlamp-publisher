@@ -387,6 +387,26 @@ async def upload_publisher_prices(
     return {"ok": True, "source": src, "filename": filename, "status": "syncing"}
 
 
+@app.post("/api/publisher-prices/refresh-articles")
+async def refresh_article_catalog_prices(background_tasks: BackgroundTasks):
+    """
+    Re-apply the catalog to every article already in the system.
+
+    Runs automatically after each import; exposed separately so the prices can
+    be re-applied without re-uploading a file. PressWhizz is untouched — it is
+    the one source still fetched live.
+    """
+    background_tasks.add_task(_refresh_articles_bg)
+    return {"ok": True, "status": "refreshing"}
+
+
+def _refresh_articles_bg() -> None:
+    try:
+        price_catalog.refresh_articles(_sb())
+    except Exception as e:
+        print(f"[publisher-prices/refresh-articles] FAILED: {e}")
+
+
 class SyncPriceSheetRequest(BaseModel):
     source:    str   # 'linksme' | 'prnews' | 'collaborator'
     sheet_url: str

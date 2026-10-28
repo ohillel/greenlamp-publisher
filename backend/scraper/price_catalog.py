@@ -313,6 +313,64 @@ def import_entries(sb, source: str, entries: list[dict], label: str) -> dict:
     return {"source": source, "imported": len(entries), "label": label}
 
 
+def refresh_articles(sb) -> dict:
+    """
+    Rewrite every article's Links.me / PRNews / Collaborator price from the
+    catalog. PressWhizz is left alone — it is still fetched live.
+
+    Needed because an article keeps whatever its last price check wrote, and
+    checks that ran before the catalog existed hold scraped figures that are
+    both out of date and, having been scraped in euros, now mislabelled as
+    dollars. Without this, a freshly imported catalog would only reach
+    articles submitted after it.
+
+    A domain the catalog does not carry has its three catalog prices cleared
+    rather than left at the old scraped value: no price is honest, a stale one
+    is not.
+    """
+    articles = (sb.from_("articles")
+                  .select("id, magazine")
+                  .not_.is_("magazine", "null")
+                  .execute().data) or []
+
+    by_domain: dict[str, list[str]] = {}
+    for a in articles:
+        domain = normalize_domain(a.get("magazine") or "")
+        if domain and "." in domain:
+            by_domain.setdefault(domain, []).append(a["id"])
+    if not by_domain:
+        return {"articles": 0, "domains": 0, "priced": 0}
+
+    # One read of the catalog for every domain in play, chunked to keep the
+    # query string a sane length.
+    prices: dict[str, dict] = {}
+    domains = list(by_domain)
+    for i in range(0, len(domains), 200):
+        rows = (sb.from_("publisher_prices")
+                  .select("domain, source, price")
+                  .in_("domain", domains[i:i + 200])
+                  .execute().data) or []
+        for r in rows:
+            prices.setdefault(r["domain"], {})[r["source"]] = float(r["price"])
+
+    priced = 0
+    for domain, ids in by_domain.items():
+        found = prices.get(domain) or {}
+        if found:
+            priced += len(ids)
+        patch = {
+            "price_linksme":      found.get("linksme"),
+            "price_prnews":       found.get("prnews"),
+            "price_collaborator": found.get("collaborator"),
+        }
+        for i in range(0, len(ids), 100):
+            sb.from_("articles").update(patch).in_("id", ids[i:i + 100]).execute()
+
+    summary = {"articles": len(articles), "domains": len(by_domain), "priced": priced}
+    print(f"[price_catalog] refreshed article prices — {summary}")
+    return summary
+
+
 def mark_syncing(sb, source: str, label: str) -> None:
     """Flag a source as mid-import, so a long upload does not read as failure."""
     sb.from_("publisher_price_sheets").upsert({
@@ -351,6 +409,9 @@ def sync_from_file(sb, source: str, content: bytes, filename: str) -> dict:
           f"{len(parsed['entries'])} price(s), {parsed['skipped']} skipped "
           f"(columns {parsed['columns']} of header {parsed['header'][:8]})")
     summary = import_entries(sb, source, parsed["entries"], filename)
+    # So a freshly imported catalog reaches the articles already in the
+    # system, not only ones submitted from here on.
+    summary["refreshed"] = refresh_articles(sb)
     summary["skipped"] = parsed["skipped"]
     summary["header"] = parsed["header"]
     return summary
@@ -372,6 +433,7 @@ def sync_source(sb, source: str, sheet_url: str) -> dict:
     summary = import_entries(sb, source, parsed["entries"], sheet_url)
     sb.from_("publisher_price_sheets").update({"sheet_url": sheet_url}) \
       .eq("source", source).execute()
+    summary["refreshed"] = refresh_articles(sb)
     summary["skipped"] = parsed["skipped"]
     summary["header"] = parsed["header"]
     summary["sheet_url"] = sheet_url
