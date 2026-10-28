@@ -222,6 +222,84 @@ def _fill_domain_filter(page, magazine_domain: str, debug: bool):
     return True
 
 
+# Every results row's Portal cell at once, as [{href, text}]. One evaluate
+# instead of one per row, so the settle check below is cheap enough to poll.
+_PORTAL_CELLS_JS = """
+() => Array.from(document.querySelectorAll('tr')).map(row => {
+    const cell = row.querySelector('td');
+    if (!cell) return null;
+    const link = cell.querySelector('a');
+    return {
+        href: link ? (link.getAttribute('href') || '') : '',
+        text: (cell.textContent || '').replace(/\\s+/g, ' ').trim(),
+    };
+}).filter(Boolean)
+"""
+
+# How long to poll for rows carrying text before falling back to asking the
+# network whether anything is still in flight.
+_TEXT_POLL_MS = 1_500
+_SETTLE_POLL_MS = 250
+# Cap on waiting for the in-flight results request. This is the signal that
+# makes "no text" trustworthy, so it is generous.
+_IDLE_TIMEOUT_MS = 5_000
+# Rendering lags the response slightly, so look once more after it lands.
+_POST_IDLE_POLL_MS = 800
+
+
+def _portal_cells(page) -> list[dict]:
+    """Each results row's Portal cell. Never raises — an unusable page is []."""
+    try:
+        return page.evaluate(_PORTAL_CELLS_JS) or []
+    except Exception:
+        return []
+
+
+def _wait_for_results(page) -> list[dict]:
+    """
+    Wait for the marketplace table to settle, and return its Portal cells.
+
+    Replaces a flat 3.5s pause plus an 8s networkidle wait — 11.5s spent on
+    every domain whether or not anything was coming. It returns the moment a
+    row carries text, which is what makes a hit cheap, and a 38-domain bulk
+    run spent most of its sixteen minutes right here.
+
+    Concluding that a table is EMPTY is the dangerous half, so it is not done
+    on a timer. A count of rows that holds steady proves nothing: PressWhizz
+    paints its rows before filling them, so a table mid-render looks exactly
+    like an empty one and a domain that does exist would be reported as
+    missing. The wait therefore defers to the network — only once nothing is
+    in flight can "still no text" mean there is nothing to come.
+    """
+    import time
+    start = time.monotonic()
+
+    def has_portal_text(cells):
+        return any((c.get("text") or c.get("href")) for c in cells)
+
+    while (time.monotonic() - start) * 1000 < _TEXT_POLL_MS:
+        cells = _portal_cells(page)
+        if has_portal_text(cells):
+            return cells
+        page.wait_for_timeout(_SETTLE_POLL_MS)
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=_IDLE_TIMEOUT_MS)
+    except Exception:
+        pass
+
+    idle_at = time.monotonic()
+    while True:
+        cells = _portal_cells(page)
+        if has_portal_text(cells):
+            return cells
+        if (time.monotonic() - idle_at) * 1000 >= _POST_IDLE_POLL_MS:
+            print(f"  [presswhizz] results table is empty — {len(cells)} row(s), "
+                  f"no portal text, network idle, after {time.monotonic() - start:.1f}s")
+            return cells
+        page.wait_for_timeout(_SETTLE_POLL_MS)
+
+
 # The Portal cell of one results row, as {href, text}. textContent rather than
 # innerText because the domain lives in a child <span> whose <a> renders empty.
 _ROW_PORTAL_JS = """
@@ -571,11 +649,7 @@ def _get_price_inner(pw, browser, magazine_domain: str, debug: bool, retried_log
     search_url = _marketplace_url_for(magazine_domain)
     print(f"  [presswhizz] opening {search_url}")
     page.goto(search_url, wait_until=NAV_WAIT)
-    _wait(page, 3500)
-    try:
-        page.wait_for_load_state("networkidle", timeout=8000)
-    except Exception:
-        pass
+    cells = _wait_for_results(page)
     screenshot(page, "pw_02_search_results", debug)
 
     # ── 4. Click "Offers" on the EXACT-domain row ───────────────────────
@@ -585,7 +659,22 @@ def _get_price_inner(pw, browser, magazine_domain: str, debug: bool, retried_log
     found = _click_offers_for_domain(page, magazine_domain, debug)
 
     if not found:
-        # Fall back to the in-page search icon in case ?portalName= changes.
+        # A table whose rows carry no portal text at all is PressWhizz saying
+        # "nothing matches this filter" — on 28 Oct hyperlogic.org,
+        # emergingtechs.net and aiocoders.com each came back with exactly 22
+        # such rows, while a portal that does exist (techbullion.com) came back
+        # with 25 rows whose text read "https://techbullion.com". Driving the
+        # search icon over an empty table only asks the same question again,
+        # five seconds and three screenshots later.
+        #
+        # The fallback still runs for anything else — rows with real text that
+        # simply did not match is the case it was written for, and the one
+        # where ?portalName= having changed would show up.
+        if cells and not any((c.get("text") or c.get("href")) for c in cells):
+            print(f"  [presswhizz] {magazine_domain!r} is not on PressWhizz "
+                  f"({len(cells)} empty row(s)) — no price")
+            return None
+
         print("  [presswhizz] no exact-domain row from the URL filter — trying the search icon")
         if _search_via_portal_icon(page, magazine_domain, debug):
             found = _click_offers_for_domain(page, magazine_domain, debug)
