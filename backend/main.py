@@ -2,7 +2,7 @@ import os
 import io
 import asyncio
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,6 +36,57 @@ def _sb():
     return create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"])
 
 CHECK_INTERVAL_MINUTES = 10
+
+
+# How far back to look for a price fetch a restart left unfinished, and how
+# many to pick up at once. Anything older than this was not interrupted by a
+# restart — it is an article that has simply never been checked.
+_ORPHAN_LOOKBACK_HOURS = 48
+_ORPHAN_LIMIT = 25
+
+# asyncio keeps only a weak reference to a task, so one with no strong
+# reference anywhere can be collected before it runs. These are held until
+# they finish.
+_RECOVERY_TASKS: set = set()
+
+
+def _recover_orphaned_price_fetches() -> None:
+    """
+    Re-queue price fetches that a restart killed mid-run.
+
+    A fetch runs as a background task inside the web process, so a deploy ends
+    it without a trace: prices_checked_at is never stamped, no error is
+    recorded, and the dashboard shows "Fetching…" for good. Three articles
+    submitted around the 12:07 deploy on 28 Oct were left exactly like that
+    while articles submitted a minute later completed normally.
+
+    Nothing else would ever retry them, so startup — the moment right after the
+    restart that caused it — is where they get picked back up.
+    """
+    try:
+        sb = _sb()
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=_ORPHAN_LOOKBACK_HOURS)).isoformat()
+        rows = (sb.from_("articles")
+                  .select("id, magazine, created_at")
+                  .is_("prices_checked_at", "null")
+                  .gte("created_at", cutoff)
+                  .order("created_at", desc=True)
+                  .limit(_ORPHAN_LIMIT)
+                  .execute().data) or []
+        pending = [r for r in rows if (r.get("magazine") or "").strip()]
+        if not pending:
+            print("[startup] no interrupted price fetches to recover")
+            return
+        print(f"[startup] recovering {len(pending)} interrupted price fetch(es)")
+        for r in pending:
+            task = asyncio.create_task(
+                _bg_fetch_prices(r["id"], extract_domain(r["magazine"]).lower(), "")
+            )
+            _RECOVERY_TASKS.add(task)
+            task.add_done_callback(_RECOVERY_TASKS.discard)
+    except Exception as e:
+        # Recovery is best-effort: never let it stop the app from starting.
+        print(f"[startup] could not recover interrupted price fetches: {e}")
 
 
 @asynccontextmanager
@@ -77,6 +128,7 @@ async def lifespan(app: FastAPI):
     _retainer, _retainer_src = resolve_retainer_email()
     print(f"[startup] RETAINER_EMAIL  = {_retainer}    ({_retainer_src})")
     print(f"[startup] email sender    = {sender_email()}")
+    _recover_orphaned_price_fetches()
     yield
     scheduler.shutdown(wait=False)
     print("[scheduler] stopped")
